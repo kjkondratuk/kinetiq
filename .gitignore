@@ -27,3 +27,5 @@ go.work.sum
 secrets
 .idea
 old
+*.wasm
+kinetiq

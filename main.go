@@ -53,6 +53,7 @@ func main() {
 
 	plugin, err := v1.NewModuleServicePlugin(ctx, v1.WazeroModuleConfig(
 		wazero.NewModuleConfig().
+			WithStartFunctions("_initialize", "_start"). // unclear why adding this made things work... It should be doing this anyway...
 			WithStdout(os.Stdout).
 			WithStderr(os.Stderr),
 	))
@@ -60,7 +61,7 @@ func main() {
 		log.Fatal("Failed to setup plugin environment", err)
 	}
 
-	load, err := plugin.Load(ctx, pluginRef, functions.PluginFunctions{Http: http.DefaultClient})
+	load, err := plugin.Load(ctx, pluginRef, functions.PluginFunctions{})
 	if err != nil {
 		log.Fatal("Failed to load plugin", err)
 	}
@@ -87,10 +88,20 @@ func main() {
 		})
 	}
 
-	// Start Server
-	log.Println("Starting server on :8080")
-	err = http.ListenAndServe(":8080", r)
+	process, err := load.Process(ctx, &v1.ProcessRequest{
+		Id:    "test",
+		Value: 1989,
+	})
 	if err != nil {
-		log.Fatal("Server error", err)
+		log.Fatalf("Failed to process request: %v", err)
 	}
+
+	log.Printf("Response: %s - %d : %s - %s", "code", process.ResponseCode, "message", process.Message)
+
+	// Start Server
+	//log.Println("Starting server on :8080")
+	//err = http.ListenAndServe(":8080", r)
+	//if err != nil {
+	//	log.Fatal("Server error", err)
+	//}
 }

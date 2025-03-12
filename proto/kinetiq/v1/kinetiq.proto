@@ -24,7 +24,7 @@ service ModuleService {
 
 // *** End WASM Module API ***
 
-// *** Start Server Module API ***
+// *** Start Server Host Function API ***
 
 // go:plugin type=host
 service HostFunctionsService {
@@ -39,5 +39,5 @@ message HttpGetResponse {
   bytes response = 1;
 }
 
-// *** End Server Module API ***
+// *** End Server Host Function API ***
 
