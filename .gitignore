@@ -30,3 +30,4 @@ old
 *.wasm
 kinetiq
 .terraform
+.DS_Store
