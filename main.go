@@ -6,10 +6,15 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	v1 "github.com/kjkondratuk/kinetiq/gen/kinetiq/v1"
 	"github.com/kjkondratuk/kinetiq/plugin/functions"
+	"github.com/kjkondratuk/kinetiq/processor"
+	sink_kafka "github.com/kjkondratuk/kinetiq/sink/kafka"
+	source_kafka "github.com/kjkondratuk/kinetiq/source/kafka"
 	"github.com/tetratelabs/wazero"
+	"github.com/twmb/franz-go/pkg/kgo"
 	"log"
 	"net/http"
 	"os"
+	"strings"
 )
 
 func main() {
@@ -27,6 +32,26 @@ func main() {
 	pluginRef := os.Getenv("PLUGIN_REF")
 	if pluginRef == "" {
 		log.Fatal("PLUGIN_REF must be set")
+	}
+
+	sourceBrokers := os.Getenv("KAFKA_SOURCE_BROKERS")
+	if sourceBrokers == "" {
+		sourceBrokers = "localhost:49092"
+	}
+
+	sourceTopic := os.Getenv("KAFKA_SOURCE_TOPIC")
+	if sourceTopic == "" {
+		log.Fatal("KAFKA_SOURCE_TOPIC must be set")
+	}
+
+	destBrokers := os.Getenv("KAFKA_DEST_BROKERS")
+	if destBrokers == "" {
+		destBrokers = sourceBrokers
+	}
+
+	destTopic := os.Getenv("KAFKA_DEST_TOPIC")
+	if sourceBrokers == destBrokers && destTopic == sourceTopic {
+		log.Fatal("KAFKA_DEST_TOPIC must be different from KAFKA_SOURCE_TOPIC when source and destination kafka sBrokers are the same")
 	}
 
 	ctx := context.Background()
@@ -88,20 +113,62 @@ func main() {
 		})
 	}
 
-	process, err := load.Process(ctx, &v1.ProcessRequest{
-		Id:    "test",
-		Value: 1989,
-	})
+	sBrokers := strings.Split(sourceBrokers, ",")
+	log.Printf("Connecting to kafka source brokers: %s", sBrokers)
+	readerClient, err := kgo.NewClient(
+		kgo.ConsumeTopics(sourceTopic),
+		kgo.SeedBrokers(sBrokers...),
+	)
 	if err != nil {
-		log.Fatalf("Failed to process request: %v", err)
+		log.Fatal("Failed to create kafka reader client", err)
 	}
+	defer readerClient.Close()
 
-	log.Printf("Response: %s - %d : %s - %s", "code", process.ResponseCode, "message", process.Message)
+	log.Print("Reader client configured...")
 
-	// Start Server
-	//log.Println("Starting server on :8080")
-	//err = http.ListenAndServe(":8080", r)
-	//if err != nil {
-	//	log.Fatal("Server error", err)
-	//}
+	reader := source_kafka.NewKafkaReader(readerClient)
+	defer reader.Close()
+
+	log.Print("Reader configured...")
+
+	proc := processor.NewWasmProcessor(load, reader.Output())
+	defer proc.Close()
+
+	log.Print("Processor configured...")
+
+	dBrokers := strings.Split(destBrokers, ",")
+	log.Printf("Connecting to kafka dest brokers: %s", dBrokers)
+	writerClient, err := kgo.NewClient(
+		kgo.DefaultProduceTopic(destTopic),
+		kgo.SeedBrokers(dBrokers...),
+	)
+	if err != nil {
+		log.Fatal("Failed to create kafka writer client", err)
+	}
+	defer writerClient.Close()
+
+	log.Print("Writer client configured...")
+
+	writer := sink_kafka.NewKafkaWriter(writerClient, proc.Output())
+	defer writer.Close()
+
+	log.Print("Writer configured...")
+
+	go writer.Write(ctx)
+	log.Print("Writer started...")
+
+	go proc.Start(ctx)
+
+	log.Print("Processor started...")
+
+	go reader.Read(ctx)
+
+	log.Print("Reader started...")
+
+	//Start Server
+	log.Println("Starting server on :8080")
+	err = http.ListenAndServe(":8080", r)
+	if err != nil {
+		log.Fatal("Server error", err)
+	}
 }

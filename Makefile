@@ -13,4 +13,12 @@ build-test-module: gen-proto
 	GOOS=wasip1 GOARCH=wasm $(GO) build -buildmode=c-shared -o test_module.wasm
 
 run-test-module: build build-test-module
-	PLUGIN_REF=./examples/module/test_module.wasm $(GO) run main.go
+	if [ -z "$(SOURCE_TOPIC)" ] || [ -z "$(DEST_TOPIC)"]; then \
+		echo "Error: SOURCE_TOPIC and DEST_TOPIC must be populated."; \
+		exit 1; \
+	fi
+	PLUGIN_REF=./examples/module/test_module.wasm KAFKA_SOURCE_TOPIC=$(SOURCE_TOPIC) KAFKA_DEST_TOPIC=$(DEST_TOPIC) $(GO) run main.go
+
+start-kafka:
+	docker-compose up -d
+	

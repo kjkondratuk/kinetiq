@@ -27,26 +27,61 @@ type ProcessRequest struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Id    string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Value int64  `protobuf:"varint,2,opt,name=value,proto3" json:"value,omitempty"`
+	Key     []byte     `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	Value   []byte     `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
+	Headers []*Headers `protobuf:"bytes,3,rep,name=headers,proto3" json:"headers,omitempty"`
 }
 
 func (x *ProcessRequest) ProtoReflect() protoreflect.Message {
 	panic(`not implemented`)
 }
 
-func (x *ProcessRequest) GetId() string {
+func (x *ProcessRequest) GetKey() []byte {
 	if x != nil {
-		return x.Id
+		return x.Key
+	}
+	return nil
+}
+
+func (x *ProcessRequest) GetValue() []byte {
+	if x != nil {
+		return x.Value
+	}
+	return nil
+}
+
+func (x *ProcessRequest) GetHeaders() []*Headers {
+	if x != nil {
+		return x.Headers
+	}
+	return nil
+}
+
+type Headers struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Key   string `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	Value []byte `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
+}
+
+func (x *Headers) ProtoReflect() protoreflect.Message {
+	panic(`not implemented`)
+}
+
+func (x *Headers) GetKey() string {
+	if x != nil {
+		return x.Key
 	}
 	return ""
 }
 
-func (x *ProcessRequest) GetValue() int64 {
+func (x *Headers) GetValue() []byte {
 	if x != nil {
 		return x.Value
 	}
-	return 0
+	return nil
 }
 
 type ProcessResponse struct {
@@ -54,26 +89,34 @@ type ProcessResponse struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	ResponseCode int64  `protobuf:"varint,1,opt,name=response_code,json=responseCode,proto3" json:"response_code,omitempty"`
-	Message      string `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	Key     []byte     `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	Value   []byte     `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
+	Headers []*Headers `protobuf:"bytes,3,rep,name=headers,proto3" json:"headers,omitempty"`
 }
 
 func (x *ProcessResponse) ProtoReflect() protoreflect.Message {
 	panic(`not implemented`)
 }
 
-func (x *ProcessResponse) GetResponseCode() int64 {
+func (x *ProcessResponse) GetKey() []byte {
 	if x != nil {
-		return x.ResponseCode
+		return x.Key
 	}
-	return 0
+	return nil
 }
 
-func (x *ProcessResponse) GetMessage() string {
+func (x *ProcessResponse) GetValue() []byte {
 	if x != nil {
-		return x.Message
+		return x.Value
 	}
-	return ""
+	return nil
+}
+
+func (x *ProcessResponse) GetHeaders() []*Headers {
+	if x != nil {
+		return x.Headers
+	}
+	return nil
 }
 
 type HttpGetRequest struct {
