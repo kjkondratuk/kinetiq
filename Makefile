@@ -2,6 +2,7 @@ GO=go
 BUF=buf
 SOURCE_TOPIC=kinetiq-test-topic
 DEST_TOPIC=kinetiq-test-topic-out
+ENV=
 
 gen-proto:
 	-rm -rf gen
@@ -23,4 +24,8 @@ run-test-module: build build-test-module
 
 start-kafka:
 	docker-compose up -d
-	
+
+	$(ENV) PLUGIN_REF=./examples/module/test_module.wasm $(GO) run main.go
+
+run-test-module-s3:
+	make run-test-module ENV='S3_INTEGRATION_ENABLED=true OBJECT_URI=some_uri'
