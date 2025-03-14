@@ -6,14 +6,14 @@ import (
 	v1 "github.com/kjkondratuk/kinetiq/gen/kinetiq/v1"
 	"github.com/kjkondratuk/kinetiq/source"
 	"log"
-	"sync/atomic"
+	"sync"
 )
 
 type wasmProcessor struct {
-	plugin  v1.ModuleService
-	enabled atomic.Bool
-	input   <-chan source.Record
-	output  chan Result
+	plugin v1.ModuleService
+	lock   sync.Mutex
+	input  <-chan source.Record
+	output chan Result
 }
 
 func NewWasmProcessor(plugin v1.ModuleService, channel <-chan source.Record) Processor {
@@ -22,8 +22,6 @@ func NewWasmProcessor(plugin v1.ModuleService, channel <-chan source.Record) Pro
 		input:  channel,
 		output: make(chan Result),
 	}
-
-	p.enabled.Store(true)
 
 	return p
 }
@@ -36,13 +34,21 @@ func (p *wasmProcessor) Start(ctx context.Context) {
 	for {
 		select {
 		case input := <-p.input:
+			p.lock.Lock()
 			process, err := p.process(ctx, input)
+			p.lock.Unlock()
 			if err != nil {
 				log.Println("error processing record: %w", err)
 			}
 			p.output <- process
 		}
 	}
+}
+
+func (p *wasmProcessor) Update(module v1.ModuleService) {
+	p.lock.Lock()
+	p.plugin = module
+	p.lock.Unlock()
 }
 
 func (p *wasmProcessor) process(ctx context.Context, record source.Record) (Result, error) {
@@ -60,6 +66,7 @@ func (p *wasmProcessor) process(ctx context.Context, record source.Record) (Resu
 		Value:   record.Value,
 		Headers: headers,
 	}
+
 	res, err := p.plugin.Process(ctx, req)
 	if err != nil {
 		return Result{}, fmt.Errorf("error processing record: %w", err)
@@ -82,14 +89,4 @@ func (p *wasmProcessor) process(ctx context.Context, record source.Record) (Resu
 
 func (p *wasmProcessor) Close() {
 	close(p.output)
-}
-
-// Enable turns on the processor
-func (p *wasmProcessor) Enable() {
-	p.enabled.Store(true)
-}
-
-// Disable turns off the processor
-func (p *wasmProcessor) Disable() {
-	p.enabled.Store(false)
 }

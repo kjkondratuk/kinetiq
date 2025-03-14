@@ -52,7 +52,7 @@ type S3SqsListener interface {
 	Listen(responder S3SqsListenerResponder)
 }
 
-type S3SqsListenerResponder func(notification S3EventNotification) error
+type S3SqsListenerResponder func(notification S3EventNotification)
 
 func NewS3SqsListener(client *sqs.Client, intervalSeconds int, url string, objectKey string) *s3SqsListener {
 	return &s3SqsListener{
@@ -65,7 +65,7 @@ func NewS3SqsListener(client *sqs.Client, intervalSeconds int, url string, objec
 
 func (l *s3SqsListener) Listen(responder S3SqsListenerResponder) {
 
-	fmt.Println("Listening for module hotswap notifications...")
+	fmt.Println("Hotswap notification listener started...")
 
 	for {
 		msgResult, err := l.client.ReceiveMessage(context.TODO(), &sqs.ReceiveMessageInput{
@@ -91,10 +91,8 @@ func (l *s3SqsListener) Listen(responder S3SqsListenerResponder) {
 				if err != nil {
 					log.Printf("Error unmarshalling hotswap notification: %s\n", err)
 				}
-				err = responder(notification)
-				if err != nil {
-					log.Printf("Error responding to hotswap notification: %s\n", err)
-				}
+				
+				responder(notification)
 
 				_, err = l.client.DeleteMessage(context.TODO(), &sqs.DeleteMessageInput{
 					QueueUrl:      aws.String(l.queueURL),
