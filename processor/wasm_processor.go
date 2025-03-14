@@ -81,8 +81,8 @@ func (p *wasmProcessor) process(ctx context.Context, record source.Record) (Resu
 	}
 
 	return Result{
-		Key:     record.Key,
-		Value:   record.Value,
+		Key:     res.Key,
+		Value:   res.Value,
 		Headers: hdr,
 	}, nil
 }
