@@ -1,5 +1,7 @@
 GO=go
 BUF=buf
+SOURCE_TOPIC=kinetiq-test-topic
+DEST_TOPIC=kinetiq-test-topic-out
 
 gen-proto:
 	-rm -rf gen
