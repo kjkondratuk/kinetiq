@@ -1,5 +1,7 @@
 GO=go
 BUF=buf
+SOURCE_TOPIC=kinetiq-test-topic
+DEST_TOPIC=kinetiq-test-topic-out
 ENV=
 
 gen-proto:
@@ -14,6 +16,15 @@ build-test-module: gen-proto
 	GOOS=wasip1 GOARCH=wasm $(GO) build -buildmode=c-shared -o test_module.wasm
 
 run-test-module: build build-test-module
+	if [ -z "$(SOURCE_TOPIC)" ] || [ -z "$(DEST_TOPIC)"]; then \
+		echo "Error: SOURCE_TOPIC and DEST_TOPIC must be populated."; \
+		exit 1; \
+	fi
+	PLUGIN_REF=./examples/module/test_module.wasm KAFKA_SOURCE_TOPIC=$(SOURCE_TOPIC) KAFKA_DEST_TOPIC=$(DEST_TOPIC) $(GO) run main.go
+
+start-kafka:
+	docker-compose up -d
+
 	$(ENV) PLUGIN_REF=./examples/module/test_module.wasm $(GO) run main.go
 
 run-test-module-s3:
