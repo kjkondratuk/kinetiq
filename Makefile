@@ -4,8 +4,11 @@ SOURCE_TOPIC=kinetiq-test-topic
 DEST_TOPIC=kinetiq-test-topic-out
 ENV=
 CHANGE_QUEUE=https://sqs.us-east-1.amazonaws.com/916325820950/kinetiq-updates-sqs
-MODULE=test_module.wasm
+MOD_ROOT=test_module
+MODULE=$(MOD_ROOT).wasm
+MODULE_SRC=$(MOD_ROOT).go
 BUCKET=kinetiq-test-bucket
+DOCKER=docker
 
 gen-proto:
 	-rm -rf gen
@@ -15,8 +18,11 @@ build: gen-proto
 	$(GO) build
 
 build-test-module: gen-proto
-	cd examples/module && \
-	GOOS=wasip1 GOARCH=wasm $(GO) build -buildmode=c-shared -o test_module.wasm
+	GOOS=wasip1 GOARCH=wasm $(GO) build -buildmode=c-shared -o examples/$(MOD_ROOT)/$(MODULE) examples/$(MODULE_SRC)
+	mv examples/$(MOD_ROOT)/$(MODULE) examples/$(MOD_ROOT)/test_module.wasm
+
+upload-test-module: build-test-module
+	aws s3 cp examples/$(MOD_ROOT)/test_module.wasm s3://$(BUCKET)/test_module.wasm
 
 run-test-module: build build-test-module
 	if [ -z "$(SOURCE_TOPIC)" ] || [ -z "$(DEST_TOPIC)"]; then \
@@ -26,10 +32,10 @@ run-test-module: build build-test-module
 	$(ENV) $(GO) run main.go
 
 start-kafka:
-	docker-compose up -d
+	$(DOCKER) compose up -d
 
 stop-kafka:
-	docker-compose down
+	$(DOCKER) compose down
 
 run-test-module-local:
 	make run-test-module ENV="PLUGIN_REF=./examples/module/$(MODULE) KAFKA_SOURCE_TOPIC=$(SOURCE_TOPIC) KAFKA_DEST_TOPIC=$(DEST_TOPIC)"
