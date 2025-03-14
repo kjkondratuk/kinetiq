@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -14,9 +15,11 @@ import (
 	source_kafka "github.com/kjkondratuk/kinetiq/source/kafka"
 	"github.com/tetratelabs/wazero"
 	"github.com/twmb/franz-go/pkg/kgo"
+	"io"
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -27,9 +30,20 @@ func main() {
 		s3Enabled = true
 	}
 
-	objectUri := os.Getenv("OBJECT_URI")
-	if s3Enabled && objectUri == "" {
-		log.Fatal("OBJECT_URI must be set when S3_INTEGRATION_ENABLED is true")
+	sb := os.Getenv("S3_INTEGRATION_BUCKET")
+	if s3Enabled && sb == "" {
+		log.Fatal("S3_INTEGRATION_BUCKET must be set when S3_INTEGRATION_ENABLED is set")
+	}
+
+	cq := os.Getenv("S3_INTEGRATION_CHANGE_QUEUE")
+	if s3Enabled && cq == "" {
+		log.Fatal("S3_INTEGRATION_CHANGE_QUEUE must be set when S3_INTEGRATION_ENABLED is set")
+	}
+
+	pollingInterval := 10
+	pollingIntervalStr := os.Getenv("S3_INTEGRATION_POLL_INTERVAL")
+	if s3Enabled && pollingIntervalStr != "" {
+		pollingInterval, _ = strconv.Atoi(pollingIntervalStr)
 	}
 
 	pluginRef := os.Getenv("PLUGIN_REF")
@@ -59,11 +73,9 @@ func main() {
 
 	ctx := context.Background()
 
-	r := chi.NewRouter()
-
-	// Middleware
-	r.Use(middleware.Logger)
-	r.Use(middleware.Recoverer)
+	if s3Enabled {
+		downloadPlugin(ctx, sb, pluginRef)
+	}
 
 	plugin, err := v1.NewModuleServicePlugin(ctx, v1.WazeroModuleConfig(
 		wazero.NewModuleConfig().
@@ -74,6 +86,7 @@ func main() {
 	if err != nil {
 		log.Fatal("Failed to setup plugin environment", err)
 	}
+	log.Printf("Plugin environment setup: %s\n", plugin)
 
 	load, err := plugin.Load(ctx, pluginRef, functions.PluginFunctions{})
 	if err != nil {
@@ -81,26 +94,7 @@ func main() {
 	}
 	defer load.Close(ctx)
 
-	// Routes
-	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
-	})
-
-	if !s3Enabled {
-		// attach endpoint to the router that manually refreshes the wasm module
-		r.Post("/update", func(writer http.ResponseWriter, request *http.Request) {
-			// update the loaded wasm module
-
-			// Fetch new module binary
-
-			// Signal stop listening for new Kafka records
-
-			// Load new module binary
-
-			// Resume processing kafka records
-		})
-	}
+	log.Printf("Plugin environment setup: %s\n", plugin)
 
 	sBrokers := strings.Split(sourceBrokers, ",")
 	log.Printf("Connecting to kafka source brokers: %s", sBrokers)
@@ -143,6 +137,21 @@ func main() {
 
 	log.Print("Writer configured...")
 
+	if !s3Enabled {
+		// refresh wasm module from local file listener
+	}
+
+	go writer.Write(ctx)
+	log.Print("Writer started...")
+
+	go proc.Start(ctx)
+
+	log.Print("Processor started...")
+
+	go reader.Read(ctx)
+
+	log.Print("Reader started...")
+
 	if s3Enabled {
 		cfg, err := config.LoadDefaultConfig(ctx)
 		if err != nil {
@@ -152,14 +161,45 @@ func main() {
 		sqsClient := sqs.NewFromConfig(cfg)
 		go s3_detector.NewS3SqsListener(
 			sqsClient,
-			10,
-			"https://sqs.us-east-1.amazonaws.com/916325820950/kinetiq-updates-sqs",
-			"test_module.wasm").
-			Listen(func(notif s3_detector.S3EventNotification) error {
+			pollingInterval,
+			cq,
+			pluginRef).
+			Listen(func(notif s3_detector.S3EventNotification) {
+				for _, record := range notif.Records {
+					if record.S3.Object.Key == pluginRef &&
+						record.S3.Bucket.Name == sb &&
+						record.EventName == "ObjectCreated:Put" {
+						// disable the reader to stop the inflow of data during deployment
+						//reader.Disable()
 
-				return nil
+						// install new processor
+						log.Printf("Loading new module: %s", record.S3.Object.ETag)
+
+						//plugin, err = v1.NewModuleServicePlugin(ctx, v1.WazeroModuleConfig(
+						//	wazero.NewModuleConfig().
+						//		WithStartFunctions("_initialize", "_start"). // unclear why adding this made things work... It should be doing this anyway...
+						//		WithStdout(os.Stdout).
+						//		WithStderr(os.Stderr),
+						//))
+						//if err != nil {
+						//	log.Fatal("Failed to refresh plugin environment", err)
+						//}
+						//
+						downloadPlugin(ctx, sb, pluginRef)
+						load, err = plugin.Load(ctx, pluginRef, functions.PluginFunctions{})
+						if err != nil {
+							log.Fatal("Failed to reload plugin", err)
+						}
+						proc.Update(load)
+						//proc.Close()
+						//proc = processor.NewWasmProcessor(load, reader.Output())
+
+						// enable reader again
+						//reader.Enable()
+					}
+				}
 			})
-		// Start listening for changes in S3 to OBJECT_URI
+		// Start listening for changes in S3 to PLUGIN_REF
 
 		// Setup listener for S3 so we are notified of changes
 
@@ -172,17 +212,17 @@ func main() {
 		// Resume processing kafka records
 	}
 
-	log.Printf("Response: %s - %d : %s - %s", "code", process.ResponseCode, "message", process.Message)
-	go writer.Write(ctx)
-	log.Print("Writer started...")
+	r := chi.NewRouter()
 
-	go proc.Start(ctx)
+	// Middleware
+	r.Use(middleware.Logger)
+	r.Use(middleware.Recoverer)
 
-	log.Print("Processor started...")
-
-	go reader.Read(ctx)
-
-	log.Print("Reader started...")
+	// Routes
+	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	})
 
 	// Start Server
 	log.Println("Starting server on :8080")
@@ -190,4 +230,38 @@ func main() {
 	if err != nil {
 		log.Fatal("Server error", err)
 	}
+}
+
+func downloadPlugin(ctx context.Context, bucket string, pluginRef string) {
+	cfg, err := config.LoadDefaultConfig(ctx)
+	if err != nil {
+		log.Fatalf("failed to load AWS config: %v", err)
+	}
+
+	s3Client := s3.NewFromConfig(cfg)
+
+	// Define a file to download to
+	outFile, err := os.Create(pluginRef)
+	if err != nil {
+		log.Fatalf("failed to create file for S3 download: %v", err)
+	}
+	defer outFile.Close()
+
+	// Download the file
+	getObjectOutput, err := s3Client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: &bucket,
+		Key:    &pluginRef,
+	})
+	if err != nil {
+		log.Fatalf("failed to download file from S3: %v", err)
+	}
+	defer getObjectOutput.Body.Close()
+
+	// Write the data to the locally created file
+	_, err = io.Copy(outFile, getObjectOutput.Body)
+	if err != nil {
+		log.Fatalf("failed to write downloaded file to local disk: %v", err)
+	}
+
+	log.Printf("Successfully downloaded %s from bucket %s to %s", pluginRef, bucket, pluginRef)
 }

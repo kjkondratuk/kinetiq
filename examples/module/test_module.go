@@ -19,10 +19,10 @@ type MyPlugin struct {
 }
 
 func (m MyPlugin) Process(ctx context.Context, request *v1.ProcessRequest) (*v1.ProcessResponse, error) {
-	log.Printf("Processing request: %s - %s : %s - %s", "key", request.Key, "value", string(request.Value))
+	log.Printf("Processing HI SUSHI request: %s - %s : %s - %s", "key", request.Key, "value", string(request.Value))
 	// Example of calling a host function
 	//r, _ := m.HttpGet(ctx, &v1.HttpGetRequest{Url: "http://google.com"})
-	log.Printf("Response: %s", string(r.Response))
+	//log.Printf("Response: %s", string(r.Response))
 	resp := v1.ProcessResponse{
 		Key:     request.Key,
 		Value:   request.Value,
