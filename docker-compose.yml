@@ -32,3 +32,19 @@ services:
         environment:
             KAFKA_CLUSTERS_0_NAME: local
             KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    kinetiq:
+        container_name: kinetiq
+        build:
+            dockerfile: Dockerfile
+            context: .
+        ports:
+            - "8080:8080"
+        environment:
+            KAFKA_SOURCE_TOPIC: kinetiq-test-topic
+            KAFKA_DEST_TOPIC: kinetiq-test-topic-out
+            KAFKA_SOURCE_BROKERS: kafka:9092
+            PLUGIN_REF: ./examples/test_module/test_module.wasm
+        volumes:
+            - ./examples/test_module_complex/test_module.wasm:/root/examples/test_module/test_module.wasm:ro
+        depends_on:
+            - kafka
