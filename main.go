@@ -175,27 +175,12 @@ func main() {
 						// install new processor
 						log.Printf("Loading new module: %s", record.S3.Object.ETag)
 
-						//plugin, err = v1.NewModuleServicePlugin(ctx, v1.WazeroModuleConfig(
-						//	wazero.NewModuleConfig().
-						//		WithStartFunctions("_initialize", "_start"). // unclear why adding this made things work... It should be doing this anyway...
-						//		WithStdout(os.Stdout).
-						//		WithStderr(os.Stderr),
-						//))
-						//if err != nil {
-						//	log.Fatal("Failed to refresh plugin environment", err)
-						//}
-						//
 						downloadPlugin(ctx, sb, pluginRef)
 						load, err = plugin.Load(ctx, pluginRef, functions.PluginFunctions{})
 						if err != nil {
 							log.Fatal("Failed to reload plugin", err)
 						}
 						proc.Update(load)
-						//proc.Close()
-						//proc = processor.NewWasmProcessor(load, reader.Output())
-
-						// enable reader again
-						//reader.Enable()
 					}
 				}
 			})
