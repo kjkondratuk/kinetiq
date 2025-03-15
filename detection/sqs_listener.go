@@ -1,4 +1,4 @@
-package s3
+package detection
 
 import (
 	"context"
@@ -48,12 +48,6 @@ type s3SqsListener struct {
 	client          *sqs.Client
 }
 
-type S3SqsListener interface {
-	Listen(responder S3SqsListenerResponder)
-}
-
-type S3SqsListenerResponder func(notification S3EventNotification)
-
 func NewS3SqsListener(client *sqs.Client, intervalSeconds int, url string, objectKey string) *s3SqsListener {
 	return &s3SqsListener{
 		client:          client,
@@ -63,9 +57,9 @@ func NewS3SqsListener(client *sqs.Client, intervalSeconds int, url string, objec
 	}
 }
 
-func (l *s3SqsListener) Listen(responder S3SqsListenerResponder) {
+func (l *s3SqsListener) Listen(responder Responder[S3EventNotification]) {
 
-	fmt.Println("Hotswap notification listener started...")
+	fmt.Println("S3 notification listener started...")
 
 	for {
 		msgResult, err := l.client.ReceiveMessage(context.TODO(), &sqs.ReceiveMessageInput{
@@ -89,9 +83,9 @@ func (l *s3SqsListener) Listen(responder S3SqsListenerResponder) {
 				notification := S3EventNotification{}
 				err := json.Unmarshal([]byte(*message.Body), &notification)
 				if err != nil {
-					log.Printf("Error unmarshalling hotswap notification: %s\n", err)
+					log.Printf("Error unmarshalling S3 notification: %s\n", err)
 				}
-				
+
 				responder(notification)
 
 				_, err = l.client.DeleteMessage(context.TODO(), &sqs.DeleteMessageInput{
@@ -99,15 +93,19 @@ func (l *s3SqsListener) Listen(responder S3SqsListenerResponder) {
 					ReceiptHandle: message.ReceiptHandle,
 				})
 				if err != nil {
-					log.Printf("Error deleting hotswap notification: %s\n", err)
+					log.Printf("Error deleting S3 notification: %s\n", err)
 				} else {
-					fmt.Printf("Hotswap notification deleted: %s\n", *message.MessageId)
+					fmt.Printf("S3 notification deleted: %s\n", *message.MessageId)
 				}
 			} else {
-				fmt.Printf("Received empty hotswap message: %s\n", *message.MessageId)
+				fmt.Printf("Received empty S3 message: %s\n", *message.MessageId)
 			}
 		}
 
 		time.Sleep(l.intervalSeconds * time.Second)
 	}
+}
+
+func (l *s3SqsListener) Close() {
+	fmt.Println("S3 notification listener stopped...")
 }

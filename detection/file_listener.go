@@ -1,4 +1,4 @@
-package filesystem
+package detection
 
 import (
 	"fmt"
@@ -12,22 +12,15 @@ type fileListener struct {
 	path    *string
 }
 
-type FileListener interface {
-	Listen(responder FileWatcherResponder)
-	Close()
-}
-
-type FileWatcherResponder func(notification FileWatcherNotification)
-
 type FileWatcherNotification struct {
 	Path string
 }
 
-func NewFilesystemListener(watcher *fsnotify.Watcher) FileListener {
+func NewFilesystemListener(watcher *fsnotify.Watcher) Listener[FileWatcherNotification] {
 	return &fileListener{watcher: watcher}
 }
 
-func NewPathWatcher(path string) (FileListener, error) {
+func NewPathWatcher(path string) (Listener[FileWatcherNotification], error) {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create path watcher: %w", err)
@@ -48,7 +41,7 @@ func NewPathWatcher(path string) (FileListener, error) {
 	return w, nil
 }
 
-func (f *fileListener) Listen(responder FileWatcherResponder) {
+func (f *fileListener) Listen(responder Responder[FileWatcherNotification]) {
 	for {
 		select {
 		case event, ok := <-f.watcher.Events:
@@ -77,5 +70,8 @@ func (f *fileListener) Listen(responder FileWatcherResponder) {
 }
 
 func (f *fileListener) Close() {
-	f.watcher.Close()
+	err := f.watcher.Close()
+	if err != nil {
+		fmt.Printf("failed to close file watcher: %s", err)
+	}
 }

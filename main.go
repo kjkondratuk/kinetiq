@@ -8,8 +8,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	app_config "github.com/kjkondratuk/kinetiq/config"
-	"github.com/kjkondratuk/kinetiq/detection/filesystem"
-	s3_detector "github.com/kjkondratuk/kinetiq/detection/s3"
+	"github.com/kjkondratuk/kinetiq/detection"
 	v1 "github.com/kjkondratuk/kinetiq/gen/kinetiq/v1"
 	"github.com/kjkondratuk/kinetiq/plugin/functions"
 	"github.com/kjkondratuk/kinetiq/processor"
@@ -110,12 +109,12 @@ func main() {
 			log.Fatalf("failed to load AWS config for s3 module hotswap listener: %e", err)
 		}
 		sqsClient := sqs.NewFromConfig(cfg)
-		go s3_detector.NewS3SqsListener(
+		go detection.NewS3SqsListener(
 			sqsClient,
 			appCfg.S3.PollInterval,
 			appCfg.S3.ChangeQueue,
 			appCfg.PluginRef).
-			Listen(func(notif s3_detector.S3EventNotification) {
+			Listen(func(notif detection.S3EventNotification) {
 				for _, record := range notif.Records {
 					if record.S3.Object.Key == appCfg.PluginRef &&
 						record.S3.Bucket.Name == appCfg.S3.Bucket &&
@@ -134,13 +133,13 @@ func main() {
 			})
 	} else {
 		// listen for changes from local file listener
-		watcher, err := filesystem.NewPathWatcher(appCfg.PluginRef)
+		watcher, err := detection.NewPathWatcher(appCfg.PluginRef)
 		defer watcher.Close()
 		if err != nil {
 			log.Fatalf("Failed to setup filesystem watcher for path: %s - %s", appCfg.PluginRef, err)
 		}
 
-		go watcher.Listen(func(notification filesystem.FileWatcherNotification) {
+		go watcher.Listen(func(notification detection.FileWatcherNotification) {
 			log.Printf("Detected change in %s", notification.Path)
 			load, err = plugin.Load(ctx, notification.Path, functions.PluginFunctions{})
 			if err != nil {

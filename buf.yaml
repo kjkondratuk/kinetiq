@@ -1,6 +1,7 @@
 version: v2
 modules:
   - path: proto
+    name: buf.build/kjkondratuk/kinetiq
 lint:
   use:
     - DEFAULT
