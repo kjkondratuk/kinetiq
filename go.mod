@@ -41,4 +41,6 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/internal/s3shared v1.18.15 // indirect
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.78.2 // indirect
 	github.com/aws/smithy-go v1.22.2 // indirect
+	github.com/fsnotify/fsnotify v1.8.0 // indirect
+	golang.org/x/sys v0.13.0 // indirect
 )

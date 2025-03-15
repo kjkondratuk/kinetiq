@@ -9,6 +9,7 @@ MODULE=$(MOD_ROOT).wasm
 MODULE_SRC=$(MOD_ROOT).go
 BUCKET=kinetiq-test-bucket
 DOCKER=docker
+KAFKA_TOPICS=kafka-topics
 
 gen-proto:
 	-rm -rf gen
@@ -30,6 +31,10 @@ run-test-module: build build-test-module
 		exit 1; \
 	fi
 	$(ENV) $(GO) run main.go
+
+create-topics:
+	kafka-topics --bootstrap-server localhost:49092 --create --topic kinetiq-test-topic
+	kafka-topics --bootstrap-server localhost:49092 --create --topic kinetiq-test-topic-out
 
 start-kafka:
 	$(DOCKER) compose up -d

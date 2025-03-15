@@ -7,6 +7,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	app_config "github.com/kjkondratuk/kinetiq/config"
+	"github.com/kjkondratuk/kinetiq/detection/filesystem"
 	s3_detector "github.com/kjkondratuk/kinetiq/detection/s3"
 	v1 "github.com/kjkondratuk/kinetiq/gen/kinetiq/v1"
 	"github.com/kjkondratuk/kinetiq/plugin/functions"
@@ -19,62 +21,17 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"strconv"
-	"strings"
 )
 
 func main() {
-	var s3Enabled bool
-	s := os.Getenv("S3_INTEGRATION_ENABLED")
-	if s != "" {
-		s3Enabled = true
-	}
-
-	sb := os.Getenv("S3_INTEGRATION_BUCKET")
-	if s3Enabled && sb == "" {
-		log.Fatal("S3_INTEGRATION_BUCKET must be set when S3_INTEGRATION_ENABLED is set")
-	}
-
-	cq := os.Getenv("S3_INTEGRATION_CHANGE_QUEUE")
-	if s3Enabled && cq == "" {
-		log.Fatal("S3_INTEGRATION_CHANGE_QUEUE must be set when S3_INTEGRATION_ENABLED is set")
-	}
-
-	pollingInterval := 10
-	pollingIntervalStr := os.Getenv("S3_INTEGRATION_POLL_INTERVAL")
-	if s3Enabled && pollingIntervalStr != "" {
-		pollingInterval, _ = strconv.Atoi(pollingIntervalStr)
-	}
-
-	pluginRef := os.Getenv("PLUGIN_REF")
-	if pluginRef == "" {
-		log.Fatal("PLUGIN_REF must be set")
-	}
-
-	sourceBrokers := os.Getenv("KAFKA_SOURCE_BROKERS")
-	if sourceBrokers == "" {
-		sourceBrokers = "localhost:49092"
-	}
-
-	sourceTopic := os.Getenv("KAFKA_SOURCE_TOPIC")
-	if sourceTopic == "" {
-		log.Fatal("KAFKA_SOURCE_TOPIC must be set")
-	}
-
-	destBrokers := os.Getenv("KAFKA_DEST_BROKERS")
-	if destBrokers == "" {
-		destBrokers = sourceBrokers
-	}
-
-	destTopic := os.Getenv("KAFKA_DEST_TOPIC")
-	if sourceBrokers == destBrokers && destTopic == sourceTopic {
-		log.Fatal("KAFKA_DEST_TOPIC must be different from KAFKA_SOURCE_TOPIC when source and destination kafka sBrokers are the same")
-	}
+	appCfg := app_config.DefaultConfigurator.Configure()
 
 	ctx := context.Background()
 
-	if s3Enabled {
-		downloadPlugin(ctx, sb, pluginRef)
+	// download initial copy of the module
+	if appCfg.S3.Enabled {
+		// TODO : eat up SQS queue so we don't load changes more than once on startup (if there's a change backlog)
+		downloadPlugin(ctx, appCfg.S3.Bucket, appCfg.PluginRef)
 	}
 
 	plugin, err := v1.NewModuleServicePlugin(ctx, v1.WazeroModuleConfig(
@@ -86,21 +43,20 @@ func main() {
 	if err != nil {
 		log.Fatal("Failed to setup plugin environment", err)
 	}
-	log.Printf("Plugin environment setup: %s\n", plugin)
+	log.Printf("Plugin environment setup...\n")
 
-	load, err := plugin.Load(ctx, pluginRef, functions.PluginFunctions{})
+	load, err := plugin.Load(ctx, appCfg.PluginRef, functions.PluginFunctions{})
 	if err != nil {
 		log.Fatal("Failed to load plugin", err)
 	}
 	defer load.Close(ctx)
 
-	log.Printf("Plugin environment setup: %s\n", plugin)
+	log.Print("Plugin environment loaded...\n")
 
-	sBrokers := strings.Split(sourceBrokers, ",")
-	log.Printf("Connecting to kafka source brokers: %s", sBrokers)
+	log.Printf("Connecting to kafka source brokers: %s", appCfg.Kafka.SourceBrokers)
 	readerClient, err := kgo.NewClient(
-		kgo.ConsumeTopics(sourceTopic),
-		kgo.SeedBrokers(sBrokers...),
+		kgo.ConsumeTopics(appCfg.Kafka.SourceTopic),
+		kgo.SeedBrokers(appCfg.Kafka.SourceBrokers...),
 	)
 	if err != nil {
 		log.Fatal("Failed to create kafka reader client", err)
@@ -119,11 +75,10 @@ func main() {
 
 	log.Print("Processor configured...")
 
-	dBrokers := strings.Split(destBrokers, ",")
-	log.Printf("Connecting to kafka dest brokers: %s", dBrokers)
+	log.Printf("Connecting to kafka dest brokers: %s", appCfg.Kafka.DestBrokers)
 	writerClient, err := kgo.NewClient(
-		kgo.DefaultProduceTopic(destTopic),
-		kgo.SeedBrokers(dBrokers...),
+		kgo.DefaultProduceTopic(appCfg.Kafka.DestTopic),
+		kgo.SeedBrokers(appCfg.Kafka.DestBrokers...),
 	)
 	if err != nil {
 		log.Fatal("Failed to create kafka writer client", err)
@@ -137,10 +92,6 @@ func main() {
 
 	log.Print("Writer configured...")
 
-	if !s3Enabled {
-		// refresh wasm module from local file listener
-	}
-
 	go writer.Write(ctx)
 	log.Print("Writer started...")
 
@@ -152,31 +103,28 @@ func main() {
 
 	log.Print("Reader started...")
 
-	if s3Enabled {
+	if appCfg.S3.Enabled {
+		// listen for changes from S3
 		cfg, err := config.LoadDefaultConfig(ctx)
 		if err != nil {
 			log.Fatalf("failed to load AWS config for s3 module hotswap listener: %e", err)
 		}
-
 		sqsClient := sqs.NewFromConfig(cfg)
 		go s3_detector.NewS3SqsListener(
 			sqsClient,
-			pollingInterval,
-			cq,
-			pluginRef).
+			appCfg.S3.PollInterval,
+			appCfg.S3.ChangeQueue,
+			appCfg.PluginRef).
 			Listen(func(notif s3_detector.S3EventNotification) {
 				for _, record := range notif.Records {
-					if record.S3.Object.Key == pluginRef &&
-						record.S3.Bucket.Name == sb &&
+					if record.S3.Object.Key == appCfg.PluginRef &&
+						record.S3.Bucket.Name == appCfg.S3.Bucket &&
 						record.EventName == "ObjectCreated:Put" {
-						// disable the reader to stop the inflow of data during deployment
-						//reader.Disable()
 
 						// install new processor
 						log.Printf("Loading new module: %s", record.S3.Object.ETag)
-
-						downloadPlugin(ctx, sb, pluginRef)
-						load, err = plugin.Load(ctx, pluginRef, functions.PluginFunctions{})
+						downloadPlugin(ctx, appCfg.S3.Bucket, appCfg.PluginRef)
+						load, err = plugin.Load(ctx, appCfg.PluginRef, functions.PluginFunctions{})
 						if err != nil {
 							log.Fatal("Failed to reload plugin", err)
 						}
@@ -184,17 +132,22 @@ func main() {
 					}
 				}
 			})
-		// Start listening for changes in S3 to PLUGIN_REF
+	} else {
+		// listen for changes from local file listener
+		watcher, err := filesystem.NewPathWatcher(appCfg.PluginRef)
+		defer watcher.Close()
+		if err != nil {
+			log.Fatalf("Failed to setup filesystem watcher for path: %s - %s", appCfg.PluginRef, err)
+		}
 
-		// Setup listener for S3 so we are notified of changes
-
-		// Fetch new module binary
-
-		// Signal stop listening for new Kafka records
-
-		// Load new module binary
-
-		// Resume processing kafka records
+		go watcher.Listen(func(notification filesystem.FileWatcherNotification) {
+			log.Printf("Detected change in %s", notification.Path)
+			load, err = plugin.Load(ctx, notification.Path, functions.PluginFunctions{})
+			if err != nil {
+				log.Fatal("Failed to reload plugin", err)
+			}
+			proc.Update(load)
+		})
 	}
 
 	r := chi.NewRouter()
