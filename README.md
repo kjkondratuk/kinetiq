@@ -32,6 +32,10 @@ Evaluating that simple use-case, it's easy to see how this same concept and its 
 different sources/sinks, data formats, and messaging providers.
 
 # Current Limitations
+
+This project is very much a work-in-progress currently, but you can track the progress of a viable release on the
+[milestones page](https://github.com/kjkondratuk/kinetiq/milestones)!
+
 1. Message processing will be briefly delayed during module reloading to avoid data loss
 2. Only works currently with Kafka inputs and outputs
 3. Only supports PLAINTEXT communication for Kafka at the moment
