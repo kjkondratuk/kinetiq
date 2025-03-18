@@ -23,7 +23,10 @@ import (
 )
 
 func main() {
-	appCfg := app_config.DefaultConfigurator.Configure()
+	appCfg, err := app_config.DefaultConfigurator.Configure()
+	if err != nil {
+		log.Fatalf("Failed to load configuration: %s", err)
+	}
 
 	ctx := context.Background()
 

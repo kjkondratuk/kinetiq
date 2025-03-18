@@ -1,7 +1,7 @@
 package config
 
 import (
-	"log"
+	"errors"
 	"os"
 	"strconv"
 	"strings"
@@ -37,7 +37,7 @@ type KafkaConfig struct {
 	DestTopic     string
 }
 
-func (c configurator) Configure() Config {
+func (c configurator) Configure() (Config, error) {
 	var s3Enabled bool
 	s := os.Getenv("S3_INTEGRATION_ENABLED")
 	if s != "" {
@@ -46,12 +46,12 @@ func (c configurator) Configure() Config {
 
 	sb := os.Getenv("S3_INTEGRATION_BUCKET")
 	if s3Enabled && sb == "" {
-		log.Fatal("S3_INTEGRATION_BUCKET must be set when S3_INTEGRATION_ENABLED is set")
+		return Config{}, errors.New("S3_INTEGRATION_BUCKET must be set when S3_INTEGRATION_ENABLED is set")
 	}
 
 	cq := os.Getenv("S3_INTEGRATION_CHANGE_QUEUE")
 	if s3Enabled && cq == "" {
-		log.Fatal("S3_INTEGRATION_CHANGE_QUEUE must be set when S3_INTEGRATION_ENABLED is set")
+		return Config{}, errors.New("S3_INTEGRATION_CHANGE_QUEUE must be set when S3_INTEGRATION_ENABLED is set")
 	}
 
 	pollingInterval := 10
@@ -62,7 +62,7 @@ func (c configurator) Configure() Config {
 
 	pluginRef := os.Getenv("PLUGIN_REF")
 	if pluginRef == "" {
-		log.Fatal("PLUGIN_REF must be set")
+		return Config{}, errors.New("PLUGIN_REF must be set")
 	}
 
 	sourceBrokers := os.Getenv("KAFKA_SOURCE_BROKERS")
@@ -72,7 +72,7 @@ func (c configurator) Configure() Config {
 
 	sourceTopic := os.Getenv("KAFKA_SOURCE_TOPIC")
 	if sourceTopic == "" {
-		log.Fatal("KAFKA_SOURCE_TOPIC must be set")
+		return Config{}, errors.New("KAFKA_SOURCE_TOPIC must be set")
 	}
 
 	destBrokers := os.Getenv("KAFKA_DEST_BROKERS")
@@ -82,7 +82,7 @@ func (c configurator) Configure() Config {
 
 	destTopic := os.Getenv("KAFKA_DEST_TOPIC")
 	if sourceBrokers == destBrokers && destTopic == sourceTopic {
-		log.Fatal("KAFKA_DEST_TOPIC must be different from KAFKA_SOURCE_TOPIC when source and destination kafka sBrokers are the same")
+		return Config{}, errors.New("KAFKA_DEST_TOPIC must be different from KAFKA_SOURCE_TOPIC when source and destination kafka sBrokers are the same")
 	}
 
 	return Config{
@@ -99,5 +99,5 @@ func (c configurator) Configure() Config {
 			DestBrokers:   strings.Split(destBrokers, ","),
 			DestTopic:     destTopic,
 		},
-	}
+	}, nil
 }
