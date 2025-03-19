@@ -5,6 +5,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
+	"github.com/fsnotify/fsnotify"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	app_config "github.com/kjkondratuk/kinetiq/config"
@@ -20,6 +21,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 )
 
 func main() {
@@ -112,12 +114,15 @@ func main() {
 			log.Fatalf("failed to load AWS config for s3 module hotswap listener: %e", err)
 		}
 		sqsClient := sqs.NewFromConfig(cfg)
-		go detection.NewS3SqsListener(
+		go detection.NewListener[detection.S3EventNotification](detection.NewS3SqsWatcher(
 			sqsClient,
 			appCfg.S3.PollInterval,
-			appCfg.S3.ChangeQueue,
-			appCfg.PluginRef).
-			Listen(func(notif detection.S3EventNotification) {
+			appCfg.S3.ChangeQueue)).
+			Listen(func(notif *detection.S3EventNotification, err error) {
+				if err != nil {
+					log.Printf("Failed to handle s3 watcher changes: %s", err)
+					return
+				}
 				for _, record := range notif.Records {
 					if record.S3.Object.Key == appCfg.PluginRef &&
 						record.S3.Bucket.Name == appCfg.S3.Bucket &&
@@ -136,19 +141,35 @@ func main() {
 			})
 	} else {
 		// listen for changes from local file listener
-		watcher, err := detection.NewPathWatcher(appCfg.PluginRef)
-		defer watcher.Close()
+		w, err := fsnotify.NewWatcher()
 		if err != nil {
-			log.Fatalf("Failed to setup filesystem watcher for path: %s - %s", appCfg.PluginRef, err)
+			log.Fatalf("failed to create path watcher: %s", err)
+		}
+		defer w.Close()
+
+		parts := strings.Split(appCfg.PluginRef, "/")
+		parentDir := strings.Join(parts[0:len(parts)-1], "/")
+
+		err = w.Add(parentDir)
+		if err != nil {
+			log.Fatalf("failed to add path to watcher: %s", err)
 		}
 
-		go watcher.Listen(func(notification detection.FileWatcherNotification) {
-			log.Printf("Detected change in %s", notification.Path)
-			load, err = plugin.Load(ctx, notification.Path, functions.PluginFunctions{})
+		watcher := detection.NewListener[fsnotify.Event](detection.NewWatcher(w.Events, w.Errors))
+
+		go watcher.Listen(func(notification *fsnotify.Event, err error) {
 			if err != nil {
-				log.Fatal("Failed to reload plugin", err)
+				log.Printf("Failed to handle file watcher changes: %s", err)
+				return
 			}
-			proc.Update(load)
+			if notification.Op.Has(fsnotify.Write) || notification.Op.Has(fsnotify.Create) {
+				log.Printf("Detected change in %s", notification.Name)
+				load, err = plugin.Load(ctx, notification.Name, functions.PluginFunctions{})
+				if err != nil {
+					log.Fatal("Failed to reload plugin", err)
+				}
+				proc.Update(load)
+			}
 		})
 	}
 

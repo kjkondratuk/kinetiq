@@ -1,0 +1,18 @@
+with-expecter: True
+inpackage: True
+dir: "{{.InterfaceDir}}"
+mockname: "Mock{{.InterfaceName}}"
+outpkg: "{{.PackageName}}"
+filename: "mock_{{.InterfaceName | snakecase}}.go"
+all: True
+
+# disable generating mocks for function aliases.  Current mockery maintainer even thinks it was a mistake: https://github.com/vektra/mockery/issues/716#issuecomment-2299809913
+disable-func-mocks: True
+
+resolve-type-alias: False
+issue-845-fix: True
+
+packages:
+  github.com/kjkondratuk/kinetiq:
+    config:
+      recursive: True

@@ -41,71 +41,62 @@ type S3ObjectEntity struct {
 	VersionId string `json:"versionId,omitempty"`
 }
 
-type s3SqsListener struct {
-	queueURL        string
-	objectKey       string
-	intervalSeconds time.Duration
-	client          *sqs.Client
+type SqsClient interface {
+	ReceiveMessage(ctx context.Context, params *sqs.ReceiveMessageInput, optFns ...func(*sqs.Options)) (*sqs.ReceiveMessageOutput, error)
+	DeleteMessage(ctx context.Context, params *sqs.DeleteMessageInput, optFns ...func(*sqs.Options)) (*sqs.DeleteMessageOutput, error)
 }
 
-func NewS3SqsListener(client *sqs.Client, intervalSeconds int, url string, objectKey string) *s3SqsListener {
-	return &s3SqsListener{
-		client:          client,
-		intervalSeconds: time.Duration(intervalSeconds),
-		objectKey:       objectKey,
-		queueURL:        url,
-	}
-}
-
-func (l *s3SqsListener) Listen(responder Responder[S3EventNotification]) {
-
+// TODO : Finish testing this
+func NewS3SqsWatcher(client SqsClient, intervalSeconds int, url string) Watcher {
+	errChan := make(chan error)
+	eventChan := make(chan S3EventNotification)
 	fmt.Println("S3 notification listener started...")
 
-	for {
-		msgResult, err := l.client.ReceiveMessage(context.TODO(), &sqs.ReceiveMessageInput{
-			QueueUrl:            aws.String(l.queueURL),
-			MaxNumberOfMessages: 10,
-			WaitTimeSeconds:     int32(l.intervalSeconds),
-		})
-		if err != nil {
-			log.Printf("Failed to receive message from queue: %s", err)
-			time.Sleep(l.intervalSeconds * time.Second)
-			continue
-		}
-
-		if len(msgResult.Messages) == 0 {
-			time.Sleep(l.intervalSeconds * time.Second)
-			continue
-		}
-
-		for _, message := range msgResult.Messages {
-			if message.Body != nil {
-				notification := S3EventNotification{}
-				err := json.Unmarshal([]byte(*message.Body), &notification)
-				if err != nil {
-					log.Printf("Error unmarshalling S3 notification: %s\n", err)
-				}
-
-				responder(notification)
-
-				_, err = l.client.DeleteMessage(context.TODO(), &sqs.DeleteMessageInput{
-					QueueUrl:      aws.String(l.queueURL),
-					ReceiptHandle: message.ReceiptHandle,
-				})
-				if err != nil {
-					log.Printf("Error deleting S3 notification: %s\n", err)
-				} else {
-					fmt.Printf("S3 notification deleted: %s\n", *message.MessageId)
-				}
-			} else {
-				fmt.Printf("Received empty S3 message: %s\n", *message.MessageId)
+	go func() {
+		for {
+			msgResult, err := client.ReceiveMessage(context.TODO(), &sqs.ReceiveMessageInput{
+				QueueUrl:            aws.String(url),
+				MaxNumberOfMessages: 10,
+				WaitTimeSeconds:     int32(intervalSeconds),
+			})
+			if err != nil {
+				log.Printf("Failed to receive message from queue: %s", err)
+				time.Sleep(time.Duration(intervalSeconds) * time.Second)
+				continue
 			}
+
+			if len(msgResult.Messages) == 0 {
+				time.Sleep(time.Duration(intervalSeconds) * time.Second)
+				continue
+			}
+
+			for _, message := range msgResult.Messages {
+				if message.Body != nil {
+					notification := S3EventNotification{}
+					err := json.Unmarshal([]byte(*message.Body), &notification)
+					if err != nil {
+						log.Printf("Error unmarshalling S3 notification: %s\n", err)
+					}
+
+					eventChan <- notification
+
+					_, err = client.DeleteMessage(context.TODO(), &sqs.DeleteMessageInput{
+						QueueUrl:      aws.String(url),
+						ReceiptHandle: message.ReceiptHandle,
+					})
+					if err != nil {
+						log.Printf("Error deleting S3 notification: %s\n", err)
+					} else {
+						fmt.Printf("S3 notification deleted: %s\n", *message.MessageId)
+					}
+				} else {
+					fmt.Printf("Received empty S3 message: %s\n", *message.MessageId)
+				}
+			}
+
+			time.Sleep(time.Duration(intervalSeconds) * time.Second)
 		}
+	}()
 
-		time.Sleep(l.intervalSeconds * time.Second)
-	}
-}
-
-func (l *s3SqsListener) Close() {
-	fmt.Println("S3 notification listener stopped...")
+	return NewWatcher(eventChan, errChan)
 }

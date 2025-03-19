@@ -98,12 +98,12 @@ func TestConfigurator_Configure(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Set environment variables
 			for k, v := range tt.env {
-				os.Setenv(k, v)
+				_ = os.Setenv(k, v)
 			}
 			// Clear environment variables after the test
 			defer func() {
 				for k := range tt.env {
-					os.Unsetenv(k)
+					_ = os.Unsetenv(k)
 				}
 			}()
 
