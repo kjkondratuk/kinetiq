@@ -20,13 +20,13 @@ func (m *MockResponder[T]) Call(notification *T, err error) {
 func Test_listener_Listen(t *testing.T) {
 	tests := []struct {
 		name                string
-		setupWatcher        func(events chan interface{}, errs chan error)
+		setupWatcher        func(events chan MockEvent, errs chan error)
 		expectedResponder   func(mockResponder *MockResponder[MockEvent])
 		expectedEventLogged string
 	}{
 		{
 			name: "valid event",
-			setupWatcher: func(events chan interface{}, errs chan error) {
+			setupWatcher: func(events chan MockEvent, errs chan error) {
 				go func() {
 					events <- MockEvent{ID: 1}
 					close(events)
@@ -37,22 +37,8 @@ func Test_listener_Listen(t *testing.T) {
 			},
 		},
 		{
-			name: "invalid event",
-			setupWatcher: func(events chan interface{}, errs chan error) {
-				go func() {
-					events <- "invalid_event"
-					close(events)
-				}()
-			},
-			expectedResponder: func(mockResponder *MockResponder[MockEvent]) {
-				mockResponder.On("Call", (*MockEvent)(nil), mock.MatchedBy(func(err error) bool {
-					return err != nil && err.Error() == "event is not of expected type: detection.MockEvent"
-				})).Once()
-			},
-		},
-		{
 			name: "error event",
-			setupWatcher: func(events chan interface{}, errs chan error) {
+			setupWatcher: func(events chan MockEvent, errs chan error) {
 				go func() {
 					errs <- errors.New("watcher error")
 					close(errs)
@@ -66,7 +52,7 @@ func Test_listener_Listen(t *testing.T) {
 		},
 		{
 			name: "no event and no error",
-			setupWatcher: func(events chan interface{}, errs chan error) {
+			setupWatcher: func(events chan MockEvent, errs chan error) {
 				close(events)
 				close(errs)
 			},
@@ -78,12 +64,12 @@ func Test_listener_Listen(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			eventsChan := make(chan interface{})
+			eventsChan := make(chan MockEvent)
 			errorsChan := make(chan error)
 			test.setupWatcher(eventsChan, errorsChan)
 
-			watcher := &Watcher{EventsChan: eventsChan, ErrorsChan: errorsChan}
-			listener := NewListener[MockEvent](*watcher).(*listener[MockEvent])
+			watcher := NewWatcher[MockEvent](eventsChan, errorsChan)
+			listener := NewListener[MockEvent](watcher).(*listener[MockEvent])
 
 			mockResponder := &MockResponder[MockEvent]{}
 			test.expectedResponder(mockResponder)

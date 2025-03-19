@@ -1,25 +1,26 @@
 package detection
 
-type Watcher struct {
-	EventsChan chan interface{}
-	ErrorsChan chan error
+type watcher[T Detectable] struct {
+	eventsChan chan T
+	errorsChan chan error
 }
 
-// bridge converts a `chan T` into a `chan interface{}`
-func bridge[T any](in chan T) chan interface{} {
-	out := make(chan interface{})
-	go func() {
-		defer close(out)
-		for v := range in {
-			out <- v
-		}
-	}()
-	return out
+type Watcher[T Detectable] interface {
+	EventsChan() chan T
+	ErrorsChan() chan error
 }
 
-func NewWatcher[T Detectable](events chan T, err chan error) Watcher {
-	return Watcher{
-		EventsChan: bridge(events),
-		ErrorsChan: err,
+func NewWatcher[T Detectable](events chan T, err chan error) Watcher[T] {
+	return &watcher[T]{
+		eventsChan: events,
+		errorsChan: err,
 	}
+}
+
+func (w watcher[T]) EventsChan() chan T {
+	return w.eventsChan
+}
+
+func (w watcher[T]) ErrorsChan() chan error {
+	return w.errorsChan
 }

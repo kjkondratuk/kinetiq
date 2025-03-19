@@ -49,7 +49,7 @@ func main() {
 	}
 	log.Printf("Plugin environment setup...\n")
 
-	load, err := plugin.Load(ctx, appCfg.PluginRef, functions.PluginFunctions{})
+	load, err := plugin.Load(ctx, appCfg.PluginRef, functions.NewDefaultPluginFunctions())
 	if err != nil {
 		log.Fatal("Failed to load plugin", err)
 	}
@@ -114,31 +114,42 @@ func main() {
 			log.Fatalf("failed to load AWS config for s3 module hotswap listener: %e", err)
 		}
 		sqsClient := sqs.NewFromConfig(cfg)
-		go detection.NewListener[detection.S3EventNotification](detection.NewS3SqsWatcher(
-			sqsClient,
-			appCfg.S3.PollInterval,
-			appCfg.S3.ChangeQueue)).
-			Listen(func(notif *detection.S3EventNotification, err error) {
-				if err != nil {
-					log.Printf("Failed to handle s3 watcher changes: %s", err)
-					return
-				}
-				for _, record := range notif.Records {
-					if record.S3.Object.Key == appCfg.PluginRef &&
-						record.S3.Bucket.Name == appCfg.S3.Bucket &&
-						record.EventName == "ObjectCreated:Put" {
 
-						// install new processor
-						log.Printf("Loading new module: %s", record.S3.Object.ETag)
-						downloadPlugin(ctx, appCfg.S3.Bucket, appCfg.PluginRef)
-						load, err = plugin.Load(ctx, appCfg.PluginRef, functions.PluginFunctions{})
-						if err != nil {
-							log.Fatal("Failed to reload plugin", err)
-						}
-						proc.Update(load)
+		opts := []detection.SqsWatcherOpt{}
+
+		if appCfg.S3.PollInterval != 0 {
+			opts = append(opts, detection.WithInterval(appCfg.S3.PollInterval))
+		}
+
+		watcher := detection.NewS3SqsWatcher(
+			sqsClient,
+			appCfg.S3.ChangeQueue, opts...)
+
+		// start watching for S3 Notification Events
+		go watcher.StartEvents(ctx)
+
+		// Listen to events and process them
+		go watcher.Listen(func(notif *detection.S3EventNotification, err error) {
+			if err != nil {
+				log.Printf("Failed to handle s3 watcher changes: %s", err)
+				return
+			}
+			for _, record := range notif.Records {
+				if record.S3.Object.Key == appCfg.PluginRef &&
+					record.S3.Bucket.Name == appCfg.S3.Bucket &&
+					record.EventName == "ObjectCreated:Put" {
+
+					// install new processor
+					log.Printf("Loading new module: %s", record.S3.Object.ETag)
+					downloadPlugin(ctx, appCfg.S3.Bucket, appCfg.PluginRef)
+					load, err = plugin.Load(ctx, appCfg.PluginRef, functions.NewDefaultPluginFunctions())
+					if err != nil {
+						log.Fatal("Failed to reload plugin", err)
 					}
+					proc.Update(load)
 				}
-			})
+			}
+		})
 	} else {
 		// listen for changes from local file listener
 		w, err := fsnotify.NewWatcher()
@@ -164,7 +175,7 @@ func main() {
 			}
 			if notification.Op.Has(fsnotify.Write) || notification.Op.Has(fsnotify.Create) {
 				log.Printf("Detected change in %s", notification.Name)
-				load, err = plugin.Load(ctx, notification.Name, functions.PluginFunctions{})
+				load, err = plugin.Load(ctx, notification.Name, functions.NewDefaultPluginFunctions())
 				if err != nil {
 					log.Fatal("Failed to reload plugin", err)
 				}
