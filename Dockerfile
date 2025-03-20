@@ -4,9 +4,9 @@ WORKDIR /app
 
 COPY . .
 
-RUN GOOS=linux GOARCH=amd64 go build -o kinetiq main.go
+RUN go build -o kinetiq main.go
 
-FROM alpine:latest
+FROM alpine:3
 
 WORKDIR /root/
 COPY --from=builder /app/kinetiq .
