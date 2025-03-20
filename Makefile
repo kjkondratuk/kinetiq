@@ -18,7 +18,7 @@ gen-proto:
 build: gen-proto
 	$(GO) build
 
-build-test-module: gen-proto
+build-test-module:
 	GOOS=wasip1 GOARCH=wasm $(GO) build -buildmode=c-shared -o examples/$(MOD_ROOT)/$(MODULE) examples/$(MODULE_SRC)
 
 hotswap-module-local: build-test-module

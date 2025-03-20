@@ -1,0 +1,12 @@
+name: Feature Branch Build
+on:
+  push:
+    branches-ignore:
+      - main
+
+jobs:
+  build-and-push:
+    uses: ./.github/workflows/docker-publish.yml
+    with:
+      tags: ${{ github.sha }}
+    secrets: inherit
