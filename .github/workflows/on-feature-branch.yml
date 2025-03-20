@@ -8,8 +8,12 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
       - name: Unit Tests
         run: go test ./...
+
       - name: Build and Push Image
         uses: ./.github/workflows/docker-publish.yml
         with:

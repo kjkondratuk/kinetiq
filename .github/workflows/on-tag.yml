@@ -10,6 +10,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
       - name: Extract version from tag
         run: |
           VERSION=${GITHUB_REF_NAME#v}  # Remove 'v' prefix
