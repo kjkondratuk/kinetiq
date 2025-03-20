@@ -3,8 +3,8 @@ name: Docker Build & Push
 on:
   workflow_call:
     inputs:
-      tags:
-        description: 'A comma-separated list of tags to push the image under'
+      tag:
+        description: 'The tag to push the image under'
         type: string
         required: true
     secrets:
@@ -29,25 +29,12 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Build and Push Docker Image with Multiple Tags
-        run: |
-          # Set up tags
-          IFS=',' read -r -a TAGS <<< "${{ inputs.tags }}"
-          IMAGE_NAME="${{ secrets.DOCKER_USERNAME }}/kinetiq"
-        
-          # Build the image
-          TAG_ARGS=""
-          for TAG in "${TAGS[@]}"; do
-            TAG_ARGS+="-t ${IMAGE_NAME}:${TAG} "
-          done
-          docker build ${TAG_ARGS} .
-        
-          # Push the image
-          docker push --all-tags ${IMAGE_NAME}
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ secrets.DOCKER_USERNAME }}/kinetiq:${{ inputs.tag }}
 
-          # Output the tags pushed
-          echo "The following tags were pushed:"
-          for TAG in "${TAGS[@]}"; do
-          echo "${IMAGE_NAME}:${TAG}"
-          done
 

@@ -5,8 +5,12 @@ on:
       - main
 
 jobs:
-  build-and-push:
-    uses: ./.github/workflows/docker-publish.yml
-    with:
-      tags: ${{ github.sha }}
-    secrets: inherit
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Unit Tests
+        run: go test ./...
+      - name: Build and Push Image
+        uses: ./.github/workflows/docker-publish.yml
+        with:
+          tag: ${{ github.sha }}
