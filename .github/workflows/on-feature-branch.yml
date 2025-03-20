@@ -6,7 +6,7 @@ on:
 
 jobs:
   build-and-push:
-    uses: .github/workflows/docker-publish.yml@feat/dockerizification
+    uses: ./.github/workflows/docker-publish.yml
     with:
       docker-owner: 'paintface07'
       tags: ${{ env.GITHUB_SHA }}
