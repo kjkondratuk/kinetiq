@@ -5,9 +5,11 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
+	"github.com/fsnotify/fsnotify"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
-	s3_detector "github.com/kjkondratuk/kinetiq/detection/s3"
+	app_config "github.com/kjkondratuk/kinetiq/config"
+	"github.com/kjkondratuk/kinetiq/detection"
 	v1 "github.com/kjkondratuk/kinetiq/gen/kinetiq/v1"
 	"github.com/kjkondratuk/kinetiq/plugin/functions"
 	"github.com/kjkondratuk/kinetiq/processor"
@@ -19,62 +21,21 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 )
 
 func main() {
-	var s3Enabled bool
-	s := os.Getenv("S3_INTEGRATION_ENABLED")
-	if s != "" {
-		s3Enabled = true
-	}
-
-	sb := os.Getenv("S3_INTEGRATION_BUCKET")
-	if s3Enabled && sb == "" {
-		log.Fatal("S3_INTEGRATION_BUCKET must be set when S3_INTEGRATION_ENABLED is set")
-	}
-
-	cq := os.Getenv("S3_INTEGRATION_CHANGE_QUEUE")
-	if s3Enabled && cq == "" {
-		log.Fatal("S3_INTEGRATION_CHANGE_QUEUE must be set when S3_INTEGRATION_ENABLED is set")
-	}
-
-	pollingInterval := 10
-	pollingIntervalStr := os.Getenv("S3_INTEGRATION_POLL_INTERVAL")
-	if s3Enabled && pollingIntervalStr != "" {
-		pollingInterval, _ = strconv.Atoi(pollingIntervalStr)
-	}
-
-	pluginRef := os.Getenv("PLUGIN_REF")
-	if pluginRef == "" {
-		log.Fatal("PLUGIN_REF must be set")
-	}
-
-	sourceBrokers := os.Getenv("KAFKA_SOURCE_BROKERS")
-	if sourceBrokers == "" {
-		sourceBrokers = "localhost:49092"
-	}
-
-	sourceTopic := os.Getenv("KAFKA_SOURCE_TOPIC")
-	if sourceTopic == "" {
-		log.Fatal("KAFKA_SOURCE_TOPIC must be set")
-	}
-
-	destBrokers := os.Getenv("KAFKA_DEST_BROKERS")
-	if destBrokers == "" {
-		destBrokers = sourceBrokers
-	}
-
-	destTopic := os.Getenv("KAFKA_DEST_TOPIC")
-	if sourceBrokers == destBrokers && destTopic == sourceTopic {
-		log.Fatal("KAFKA_DEST_TOPIC must be different from KAFKA_SOURCE_TOPIC when source and destination kafka sBrokers are the same")
+	appCfg, err := app_config.DefaultConfigurator.Configure()
+	if err != nil {
+		log.Fatalf("Failed to load configuration: %s", err)
 	}
 
 	ctx := context.Background()
 
-	if s3Enabled {
-		downloadPlugin(ctx, sb, pluginRef)
+	// download initial copy of the module
+	if appCfg.S3.Enabled {
+		// TODO : eat up SQS queue so we don't load changes more than once on startup (if there's a change backlog)
+		downloadPlugin(ctx, appCfg.S3.Bucket, appCfg.PluginRef)
 	}
 
 	plugin, err := v1.NewModuleServicePlugin(ctx, v1.WazeroModuleConfig(
@@ -86,21 +47,20 @@ func main() {
 	if err != nil {
 		log.Fatal("Failed to setup plugin environment", err)
 	}
-	log.Printf("Plugin environment setup: %s\n", plugin)
+	log.Printf("Plugin environment setup...\n")
 
-	load, err := plugin.Load(ctx, pluginRef, functions.PluginFunctions{})
+	load, err := plugin.Load(ctx, appCfg.PluginRef, functions.NewDefaultPluginFunctions())
 	if err != nil {
 		log.Fatal("Failed to load plugin", err)
 	}
 	defer load.Close(ctx)
 
-	log.Printf("Plugin environment setup: %s\n", plugin)
+	log.Print("Plugin environment loaded...\n")
 
-	sBrokers := strings.Split(sourceBrokers, ",")
-	log.Printf("Connecting to kafka source brokers: %s", sBrokers)
+	log.Printf("Connecting to kafka source brokers: %s", appCfg.Kafka.SourceBrokers)
 	readerClient, err := kgo.NewClient(
-		kgo.ConsumeTopics(sourceTopic),
-		kgo.SeedBrokers(sBrokers...),
+		kgo.ConsumeTopics(appCfg.Kafka.SourceTopic),
+		kgo.SeedBrokers(appCfg.Kafka.SourceBrokers...),
 	)
 	if err != nil {
 		log.Fatal("Failed to create kafka reader client", err)
@@ -119,11 +79,10 @@ func main() {
 
 	log.Print("Processor configured...")
 
-	dBrokers := strings.Split(destBrokers, ",")
-	log.Printf("Connecting to kafka dest brokers: %s", dBrokers)
+	log.Printf("Connecting to kafka dest brokers: %s", appCfg.Kafka.DestBrokers)
 	writerClient, err := kgo.NewClient(
-		kgo.DefaultProduceTopic(destTopic),
-		kgo.SeedBrokers(dBrokers...),
+		kgo.DefaultProduceTopic(appCfg.Kafka.DestTopic),
+		kgo.SeedBrokers(appCfg.Kafka.DestBrokers...),
 	)
 	if err != nil {
 		log.Fatal("Failed to create kafka writer client", err)
@@ -137,10 +96,6 @@ func main() {
 
 	log.Print("Writer configured...")
 
-	if !s3Enabled {
-		// refresh wasm module from local file listener
-	}
-
 	go writer.Write(ctx)
 	log.Print("Writer started...")
 
@@ -152,49 +107,81 @@ func main() {
 
 	log.Print("Reader started...")
 
-	if s3Enabled {
+	if appCfg.S3.Enabled {
+		// listen for changes from S3
 		cfg, err := config.LoadDefaultConfig(ctx)
 		if err != nil {
 			log.Fatalf("failed to load AWS config for s3 module hotswap listener: %e", err)
 		}
-
 		sqsClient := sqs.NewFromConfig(cfg)
-		go s3_detector.NewS3SqsListener(
+
+		opts := []detection.SqsWatcherOpt{}
+
+		if appCfg.S3.PollInterval != 0 {
+			opts = append(opts, detection.WithInterval(appCfg.S3.PollInterval))
+		}
+
+		watcher := detection.NewS3SqsWatcher(
 			sqsClient,
-			pollingInterval,
-			cq,
-			pluginRef).
-			Listen(func(notif s3_detector.S3EventNotification) {
-				for _, record := range notif.Records {
-					if record.S3.Object.Key == pluginRef &&
-						record.S3.Bucket.Name == sb &&
-						record.EventName == "ObjectCreated:Put" {
-						// disable the reader to stop the inflow of data during deployment
-						//reader.Disable()
+			appCfg.S3.ChangeQueue, opts...)
 
-						// install new processor
-						log.Printf("Loading new module: %s", record.S3.Object.ETag)
+		// start watching for S3 Notification Events
+		go watcher.StartEvents(ctx)
 
-						downloadPlugin(ctx, sb, pluginRef)
-						load, err = plugin.Load(ctx, pluginRef, functions.PluginFunctions{})
-						if err != nil {
-							log.Fatal("Failed to reload plugin", err)
-						}
-						proc.Update(load)
+		// Listen to events and process them
+		go watcher.Listen(ctx, func(notif *detection.S3EventNotification, err error) {
+			if err != nil {
+				log.Printf("Failed to handle s3 watcher changes: %s", err)
+				return
+			}
+			for _, record := range notif.Records {
+				if record.S3.Object.Key == appCfg.PluginRef &&
+					record.S3.Bucket.Name == appCfg.S3.Bucket &&
+					record.EventName == "ObjectCreated:Put" {
+
+					// install new processor
+					log.Printf("Loading new module: %s", record.S3.Object.ETag)
+					downloadPlugin(ctx, appCfg.S3.Bucket, appCfg.PluginRef)
+					load, err = plugin.Load(ctx, appCfg.PluginRef, functions.NewDefaultPluginFunctions())
+					if err != nil {
+						log.Fatal("Failed to reload plugin", err)
 					}
+					proc.Update(load)
 				}
-			})
-		// Start listening for changes in S3 to PLUGIN_REF
+			}
+		})
+	} else {
+		// listen for changes from local file listener
+		w, err := fsnotify.NewWatcher()
+		if err != nil {
+			log.Fatalf("failed to create path watcher: %s", err)
+		}
+		defer w.Close()
 
-		// Setup listener for S3 so we are notified of changes
+		parts := strings.Split(appCfg.PluginRef, "/")
+		parentDir := strings.Join(parts[0:len(parts)-1], "/")
 
-		// Fetch new module binary
+		err = w.Add(parentDir)
+		if err != nil {
+			log.Fatalf("failed to add path to watcher: %s", err)
+		}
 
-		// Signal stop listening for new Kafka records
+		watcher := detection.NewListener[fsnotify.Event](detection.NewWatcher(w.Events, w.Errors))
 
-		// Load new module binary
-
-		// Resume processing kafka records
+		go watcher.Listen(ctx, func(notification *fsnotify.Event, err error) {
+			if err != nil {
+				log.Printf("Failed to handle file watcher changes: %s", err)
+				return
+			}
+			if notification.Op.Has(fsnotify.Write) || notification.Op.Has(fsnotify.Create) {
+				log.Printf("Detected change in %s", notification.Name)
+				load, err = plugin.Load(ctx, notification.Name, functions.NewDefaultPluginFunctions())
+				if err != nil {
+					log.Fatal("Failed to reload plugin", err)
+				}
+				proc.Update(load)
+			}
+		})
 	}
 
 	r := chi.NewRouter()

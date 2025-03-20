@@ -10,12 +10,17 @@ import (
 )
 
 type kafkaWriter struct {
-	client  *kgo.Client
+	client  KafkaClient
 	enabled atomic.Bool
 	input   <-chan processor.Result
 }
 
-func NewKafkaWriter(client *kgo.Client, input <-chan processor.Result) sink.Sink {
+type KafkaClient interface {
+	Produce(ctx context.Context, record *kgo.Record, cb func(record *kgo.Record, err error))
+	Close()
+}
+
+func NewKafkaWriter(client KafkaClient, input <-chan processor.Result) sink.Sink {
 	w := &kafkaWriter{
 		client: client,
 		input:  input,
@@ -28,7 +33,13 @@ func NewKafkaWriter(client *kgo.Client, input <-chan processor.Result) sink.Sink
 func (w *kafkaWriter) Write(ctx context.Context) {
 	for {
 		select {
-		case input := <-w.input:
+		case <-ctx.Done():
+			return
+		case input, ok := <-w.input:
+			if !ok {
+				log.Print("Kafka producer input channel closed\n")
+				return
+			}
 			headers := make([]kgo.RecordHeader, len(input.Headers))
 			for i, h := range input.Headers {
 				headers[i] = kgo.RecordHeader{
@@ -36,7 +47,7 @@ func (w *kafkaWriter) Write(ctx context.Context) {
 					Value: h.Value,
 				}
 			}
-
+			
 			w.client.Produce(ctx, &kgo.Record{
 				Key:     input.Key,
 				Value:   input.Value,

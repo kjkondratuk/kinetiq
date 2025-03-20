@@ -39,6 +39,7 @@ func (m MyPlugin) Process(ctx context.Context, request *v1.ProcessRequest) (*v1.
 		return nil, fmt.Errorf("failed to unmarshal brand response in webassembly module: %w", err)
 	}
 
+	// Select a random available brand
 	var combined combinedResponse
 	if len(brands) > 0 {
 		selectedBrand := brands[rand.Intn(len(brands))]

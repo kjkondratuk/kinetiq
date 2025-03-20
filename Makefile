@@ -9,6 +9,7 @@ MODULE=$(MOD_ROOT).wasm
 MODULE_SRC=$(MOD_ROOT).go
 BUCKET=kinetiq-test-bucket
 DOCKER=docker
+KAFKA_TOPICS=kafka-topics
 
 gen-proto:
 	-rm -rf gen
@@ -19,9 +20,11 @@ build: gen-proto
 
 build-test-module:
 	GOOS=wasip1 GOARCH=wasm $(GO) build -buildmode=c-shared -o examples/$(MOD_ROOT)/$(MODULE) examples/$(MODULE_SRC)
-	mv examples/$(MOD_ROOT)/$(MODULE) examples/$(MOD_ROOT)/test_module.wasm
 
-upload-test-module: build-test-module
+hotswap-module-local: build-test-module
+	mv examples/$(MOD_ROOT)/$(MODULE) examples/test_module/test_module.wasm
+
+hotswap-s3: build-test-module
 	aws s3 cp examples/$(MOD_ROOT)/test_module.wasm s3://$(BUCKET)/test_module.wasm
 
 run-test-module: build build-test-module
@@ -30,6 +33,10 @@ run-test-module: build build-test-module
 		exit 1; \
 	fi
 	$(ENV) $(GO) run main.go
+
+create-topics:
+	kafka-topics --bootstrap-server localhost:49092 --create --topic kinetiq-test-topic
+	kafka-topics --bootstrap-server localhost:49092 --create --topic kinetiq-test-topic-out
 
 start-kafka:
 	$(DOCKER) compose up -d
