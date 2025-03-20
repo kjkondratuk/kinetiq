@@ -1,4 +1,4 @@
-name: Feature Branch Build
+name: Tag Build
 on:
   push:
     tags:
