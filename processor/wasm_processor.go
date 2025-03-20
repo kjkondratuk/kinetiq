@@ -33,12 +33,16 @@ func (p *wasmProcessor) Output() <-chan Result {
 func (p *wasmProcessor) Start(ctx context.Context) {
 	for {
 		select {
+		case <-ctx.Done():
+			return
 		case input := <-p.input:
+			// TODO : can probably improve performance by not locking on each message and instead signalling a stop of this loop and a restart
 			p.lock.Lock()
 			process, err := p.process(ctx, input)
 			p.lock.Unlock()
 			if err != nil {
 				log.Println("error processing record: %w", err)
+				continue
 			}
 			p.output <- process
 		}

@@ -10,12 +10,16 @@ import (
 )
 
 type kafkaReader struct {
-	client  *kgo.Client
+	client  KafkaClient
 	enabled atomic.Bool
 	results chan source.Record
 }
 
-func NewKafkaReader(client *kgo.Client) source.Source {
+type KafkaClient interface {
+	PollFetches(ctx context.Context) kgo.Fetches
+}
+
+func NewKafkaReader(client KafkaClient) source.Source {
 	reader := &kafkaReader{
 		client:  client,
 		results: make(chan source.Record),
@@ -26,45 +30,50 @@ func NewKafkaReader(client *kgo.Client) source.Source {
 
 }
 
-func (r *kafkaReader) Output() <-chan source.Record {
-	return r.results
-}
-
 func (r *kafkaReader) Read(ctx context.Context) {
 	for {
-		// Exit loop if disabled
-		if !r.enabled.Load() {
-			time.Sleep(100 * time.Millisecond) // Prevent busy-waiting
-			continue
-		}
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			// Exit loop if disabled
+			if !r.enabled.Load() {
+				time.Sleep(100 * time.Millisecond) // Prevent busy-waiting
+				continue
+			}
 
-		fetches := r.client.PollFetches(ctx)
-		if errs := fetches.Errors(); len(errs) > 0 {
-			// All errors are retried internally when fetching, but non-retriable errors are
-			// returned from polls so that users can notice and take action.
-			panic(fmt.Sprint(errs))
-		}
+			fetches := r.client.PollFetches(ctx)
+			if errs := fetches.Errors(); len(errs) > 0 {
+				// All errors are retried internally when fetching, but non-retriable errors are
+				// returned from polls so that users can notice and take action.
+				panic(fmt.Sprint(errs))
+			}
 
-		iter := fetches.RecordIter()
-		for !iter.Done() {
-			record := iter.Next()
+			iter := fetches.RecordIter()
+			for !iter.Done() {
+				record := iter.Next()
 
-			headers := make([]source.RecordHeader, len(record.Headers))
-			for i, header := range record.Headers {
-				headers[i] = source.RecordHeader{
-					Key:   header.Key,
-					Value: header.Value,
+				headers := make([]source.RecordHeader, len(record.Headers))
+				for i, header := range record.Headers {
+					headers[i] = source.RecordHeader{
+						Key:   header.Key,
+						Value: header.Value,
+					}
 				}
-			}
 
-			standardRec := source.Record{
-				Headers: headers,
-				Key:     record.Key,
-				Value:   record.Value,
+				standardRec := source.Record{
+					Headers: headers,
+					Key:     record.Key,
+					Value:   record.Value,
+				}
+				r.results <- standardRec
 			}
-			r.results <- standardRec
 		}
 	}
+}
+
+func (r *kafkaReader) Output() <-chan source.Record {
+	return r.results
 }
 
 func (r *kafkaReader) Close() {

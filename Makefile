@@ -20,9 +20,11 @@ build: gen-proto
 
 build-test-module: gen-proto
 	GOOS=wasip1 GOARCH=wasm $(GO) build -buildmode=c-shared -o examples/$(MOD_ROOT)/$(MODULE) examples/$(MODULE_SRC)
-	mv examples/$(MOD_ROOT)/$(MODULE) examples/$(MOD_ROOT)/test_module.wasm
 
-upload-test-module: build-test-module
+hotswap-module-local: build-test-module
+	mv examples/$(MOD_ROOT)/$(MODULE) examples/test_module/test_module.wasm
+
+hotswap-s3: build-test-module
 	aws s3 cp examples/$(MOD_ROOT)/test_module.wasm s3://$(BUCKET)/test_module.wasm
 
 run-test-module: build build-test-module
