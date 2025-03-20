@@ -9,5 +9,5 @@ jobs:
     uses: ./.github/workflows/docker-publish.yml
     with:
       docker-owner: 'paintface07'
-      tags: "${{ github.sha }}"
+      tags: ${{ github.sha }}
     secrets: inherit
