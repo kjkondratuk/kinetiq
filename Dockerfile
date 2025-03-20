@@ -3,6 +3,7 @@ FROM golang:1.24.1 AS builder
 WORKDIR /app
 
 COPY . .
+COPY README.md /
 
 RUN go build -o kinetiq main.go
 
