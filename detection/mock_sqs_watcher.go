@@ -115,9 +115,9 @@ func (_c *MockSqsWatcher_EventsChan_Call) RunAndReturn(run func() chan S3EventNo
 	return _c
 }
 
-// Listen provides a mock function with given fields: responder
-func (_m *MockSqsWatcher) Listen(responder Responder[S3EventNotification]) {
-	_m.Called(responder)
+// Listen provides a mock function with given fields: ctx, responder
+func (_m *MockSqsWatcher) Listen(ctx context.Context, responder Responder[S3EventNotification]) {
+	_m.Called(ctx, responder)
 }
 
 // MockSqsWatcher_Listen_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Listen'
@@ -126,14 +126,15 @@ type MockSqsWatcher_Listen_Call struct {
 }
 
 // Listen is a helper method to define mock.On call
+//   - ctx context.Context
 //   - responder Responder[S3EventNotification]
-func (_e *MockSqsWatcher_Expecter) Listen(responder interface{}) *MockSqsWatcher_Listen_Call {
-	return &MockSqsWatcher_Listen_Call{Call: _e.mock.On("Listen", responder)}
+func (_e *MockSqsWatcher_Expecter) Listen(ctx interface{}, responder interface{}) *MockSqsWatcher_Listen_Call {
+	return &MockSqsWatcher_Listen_Call{Call: _e.mock.On("Listen", ctx, responder)}
 }
 
-func (_c *MockSqsWatcher_Listen_Call) Run(run func(responder Responder[S3EventNotification])) *MockSqsWatcher_Listen_Call {
+func (_c *MockSqsWatcher_Listen_Call) Run(run func(ctx context.Context, responder Responder[S3EventNotification])) *MockSqsWatcher_Listen_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(Responder[S3EventNotification]))
+		run(args[0].(context.Context), args[1].(Responder[S3EventNotification]))
 	})
 	return _c
 }
@@ -143,7 +144,7 @@ func (_c *MockSqsWatcher_Listen_Call) Return() *MockSqsWatcher_Listen_Call {
 	return _c
 }
 
-func (_c *MockSqsWatcher_Listen_Call) RunAndReturn(run func(Responder[S3EventNotification])) *MockSqsWatcher_Listen_Call {
+func (_c *MockSqsWatcher_Listen_Call) RunAndReturn(run func(context.Context, Responder[S3EventNotification])) *MockSqsWatcher_Listen_Call {
 	_c.Run(run)
 	return _c
 }

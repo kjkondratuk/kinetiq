@@ -8,7 +8,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
 	"log"
-
 	"time"
 )
 
@@ -43,7 +42,6 @@ func WithInterval(intervalSeconds int) SqsWatcherOpt {
 	}
 }
 
-// TODO : Finish testing this
 func NewS3SqsWatcher(client SqsClient, url string, opts ...SqsWatcherOpt) SqsWatcher {
 	errChan := make(chan error)
 	eventChan := make(chan S3EventNotification)
@@ -70,27 +68,32 @@ func (s *sqsWatcher) StartEvents(ctx context.Context) {
 
 	go func() {
 		for {
-			msgResult, err := s.client.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
-				QueueUrl:            aws.String(s.url),
-				MaxNumberOfMessages: 10,
-				WaitTimeSeconds:     int32(s.pollIntervalSeconds),
-			})
-			if err != nil {
-				log.Printf("Failed to receive message from queue: %s", err)
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				msgResult, err := s.client.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
+					QueueUrl:            aws.String(s.url),
+					MaxNumberOfMessages: 10,
+					WaitTimeSeconds:     int32(s.pollIntervalSeconds),
+				})
+				if err != nil {
+					log.Printf("Failed to receive message from queue: %s", err)
+					time.Sleep(time.Duration(s.pollIntervalSeconds) * time.Second)
+					continue
+				}
+
+				if len(msgResult.Messages) == 0 {
+					time.Sleep(time.Duration(s.pollIntervalSeconds) * time.Second)
+					continue
+				}
+
+				for _, message := range msgResult.Messages {
+					s.process(ctx, message)
+				}
+
 				time.Sleep(time.Duration(s.pollIntervalSeconds) * time.Second)
-				continue
 			}
-
-			if len(msgResult.Messages) == 0 {
-				time.Sleep(time.Duration(s.pollIntervalSeconds) * time.Second)
-				continue
-			}
-
-			for _, message := range msgResult.Messages {
-				s.process(ctx, message)
-			}
-
-			time.Sleep(time.Duration(s.pollIntervalSeconds) * time.Second)
 		}
 	}()
 }
@@ -125,8 +128,8 @@ func (s *sqsWatcher) process(ctx context.Context, message types.Message) {
 }
 
 // Listen : delegates to the underlying listener implementation
-func (s *sqsWatcher) Listen(responder Responder[S3EventNotification]) {
-	s.listener.Listen(responder)
+func (s *sqsWatcher) Listen(ctx context.Context, responder Responder[S3EventNotification]) {
+	s.listener.Listen(ctx, responder)
 }
 
 // EventsChan : delegates to the underlying event channel implementation

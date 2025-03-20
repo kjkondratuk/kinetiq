@@ -1,6 +1,9 @@
 package detection
 
-import "github.com/fsnotify/fsnotify"
+import (
+	"context"
+	"github.com/fsnotify/fsnotify"
+)
 
 type Detectable interface {
 	S3EventNotification | fsnotify.Event | MockEvent
@@ -12,7 +15,7 @@ type MockEvent struct {
 }
 
 type Listener[T Detectable] interface {
-	Listen(responder Responder[T])
+	Listen(ctx context.Context, responder Responder[T])
 }
 
 type Responder[T Detectable] func(notification *T, err error)

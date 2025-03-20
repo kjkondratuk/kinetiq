@@ -129,7 +129,7 @@ func main() {
 		go watcher.StartEvents(ctx)
 
 		// Listen to events and process them
-		go watcher.Listen(func(notif *detection.S3EventNotification, err error) {
+		go watcher.Listen(ctx, func(notif *detection.S3EventNotification, err error) {
 			if err != nil {
 				log.Printf("Failed to handle s3 watcher changes: %s", err)
 				return
@@ -168,7 +168,7 @@ func main() {
 
 		watcher := detection.NewListener[fsnotify.Event](detection.NewWatcher(w.Events, w.Errors))
 
-		go watcher.Listen(func(notification *fsnotify.Event, err error) {
+		go watcher.Listen(ctx, func(notification *fsnotify.Event, err error) {
 			if err != nil {
 				log.Printf("Failed to handle file watcher changes: %s", err)
 				return

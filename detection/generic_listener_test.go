@@ -74,7 +74,7 @@ func Test_listener_Listen(t *testing.T) {
 			mockResponder := &MockResponder[MockEvent]{}
 			test.expectedResponder(mockResponder)
 
-			go listener.Listen(mockResponder.Call)
+			go listener.Listen(t.Context(), mockResponder.Call)
 
 			time.Sleep(100 * time.Millisecond) // Ensure all goroutines execute
 

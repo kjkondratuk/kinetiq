@@ -1,6 +1,7 @@
 package detection
 
 import (
+	"context"
 	"log"
 )
 
@@ -12,9 +13,11 @@ func NewListener[T Detectable](watcher Watcher[T]) Listener[T] {
 	return &listener[T]{watcher: watcher}
 }
 
-func (f *listener[T]) Listen(responder Responder[T]) {
+func (f *listener[T]) Listen(ctx context.Context, responder Responder[T]) {
 	for {
 		select {
+		case <-ctx.Done():
+			return
 		case event, ok := <-f.watcher.EventsChan():
 			log.Printf("event: %+v", event)
 			if !ok {
