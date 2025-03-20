@@ -1,0 +1,31 @@
+name: Feature Branch Build
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Unit Tests
+        run: go test ./...
+
+      - name: Build and Push Image
+        uses: ./.github/actions/docker-publish
+        with:
+          tag: 'latest'
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Update Docker Hub Description
+        uses: peter-evans/dockerhub-description@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+          repository: ${{ secrets.DOCKER_USERNAME }}/kinetiq
+          short-description: "A web-assembly extensible, composable, kafka processor that supports hot-reloading"
+          readme-filepath: ./README.md

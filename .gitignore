@@ -28,6 +28,5 @@ secrets
 .idea
 old
 *.wasm
-kinetiq
 .DS_Store
 .terraform
