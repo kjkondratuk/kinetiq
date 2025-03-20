@@ -19,6 +19,7 @@ jobs:
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Build and Push Image
+        secrets: inherit
         uses: ./.github/actions/docker-publish
         with:
           tag: $VERSION
