@@ -15,7 +15,7 @@ jobs:
         run: go test ./...
 
       - name: Build and Push Image
-        uses: ./.github/actions/docker-publish.yml
+        uses: ./.github/actions/docker-publish
         with:
           tag: 'latest'
 
