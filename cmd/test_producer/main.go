@@ -43,6 +43,6 @@ func main() {
 
 		log.Printf("Produced message: %s - %s", key, string(payloadBytes))
 
-		time.Sleep(time.Second * 5)
+		time.Sleep(time.Millisecond * 300)
 	}
 }
