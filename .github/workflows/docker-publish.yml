@@ -6,6 +6,7 @@ on:
       tags:
         description: 'A comma-separated list of tags to push the image under'
         type: boolean
+        required: true
     secrets:
       DOCKER_USERNAME:
         description: 'The owner of the docker registry to push to on Docker Hub'

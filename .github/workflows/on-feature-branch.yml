@@ -8,5 +8,5 @@ jobs:
   build-and-push:
     uses: ./.github/workflows/docker-publish.yml
     with:
-      tags: "${{ github.sha }}"
+      tags: ${{ github.sha }}
     secrets: inherit
