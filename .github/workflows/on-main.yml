@@ -15,9 +15,12 @@ jobs:
         run: go test ./...
 
       - name: Build and Push Image
-        uses: ./.github/actions/docker-publish
+        uses: ./.github/actions/docker-publish/action.yml
         with:
           tag: 'latest'
+        secrets:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
 
       - name: Update Docker Hub Description
         uses: peter-evans/dockerhub-description@v3
