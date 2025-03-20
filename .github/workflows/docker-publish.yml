@@ -5,7 +5,7 @@ on:
     inputs:
       tags:
         description: 'A comma-separated list of tags to push the image under'
-        type: boolean
+        type: string
         required: true
     secrets:
       DOCKER_USERNAME:
