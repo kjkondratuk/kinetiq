@@ -47,4 +47,3 @@ message HttpGetResponse {
 }
 
 // *** End Server Host Function API ***
-
