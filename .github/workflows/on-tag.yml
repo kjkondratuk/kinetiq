@@ -19,6 +19,6 @@ jobs:
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Build and Push Image
-        uses: ./.github/actions/docker-publish/action.yml
+        uses: ./.github/actions/docker-publish
         with:
           tag: $VERSION
