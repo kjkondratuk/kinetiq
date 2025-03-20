@@ -15,7 +15,9 @@ jobs:
         run: go test ./...
 
       - name: Build and Push Image
-        secrets: inherit
-        uses: ./.github/actions/docker-publish
+        uses: ./.github/actions/docker-publish.yml
         with:
           tag: ${{ github.sha }}
+        secrets:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
