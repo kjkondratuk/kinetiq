@@ -15,10 +15,11 @@ jobs:
         run: go test ./...
 
       - name: Build and Push Image
-        secrets: inherit
         uses: ./.github/actions/docker-publish
         with:
           tag: 'latest'
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
 
       - name: Update Docker Hub Description
         uses: peter-evans/dockerhub-description@v3
