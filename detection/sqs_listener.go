@@ -7,6 +7,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
+	"github.com/kjkondratuk/kinetiq/loader"
 	"log"
 	"time"
 )
@@ -30,7 +31,33 @@ type SqsWatcher interface {
 	StartEvents(ctx context.Context)
 }
 
-var _ Listener[S3EventNotification] = &sqsWatcher{}
+var _ Listener[S3EventNotification] = &sqsWatcher{} // ensure sqsWatcher is an S3EventNotification listener
+var _ Watcher[S3EventNotification] = &sqsWatcher{}  // ensure sqsWatcher is an S3EventNotification watcher
+
+func S3NotificationPluginReloadResponder(ctx context.Context, pluginRef string, bucket string,
+	dl loader.Loader) Responder[S3EventNotification] {
+
+	return func(event *S3EventNotification, err error) {
+		if err != nil {
+			log.Printf("Failed to handle s3 watcher changes: %s", err)
+			return
+		}
+		for _, record := range event.Records {
+			if record.S3.Object.Key == pluginRef &&
+				record.S3.Bucket.Name == bucket &&
+				record.EventName == "ObjectCreated:Put" {
+
+				// install new processor
+				log.Printf("Loading new module: %s", record.S3.Object.ETag)
+				err = dl.Reload(ctx)
+				if err != nil {
+					log.Printf("Failed to reload module: %s", err)
+					return
+				}
+			}
+		}
+	}
+}
 
 type MessageProcessor func(ctx context.Context, message types.Message)
 

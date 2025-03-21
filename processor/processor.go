@@ -2,7 +2,6 @@ package processor
 
 import (
 	"context"
-	v1 "github.com/kjkondratuk/kinetiq/gen/kinetiq/v1"
 )
 
 type Result struct {
@@ -18,7 +17,7 @@ type RecordHeader struct {
 
 type Processor interface {
 	Start(ctx context.Context)
-	Update(module v1.ModuleService)
+	//Update(module v1.ModuleService)
 	Output() <-chan Result
 	Close()
 }
