@@ -38,10 +38,10 @@ func (f *listener[T]) Listen(ctx context.Context, responder Responder[T]) {
 		case <-ctx.Done():
 			return
 		case event, ok := <-f.watcher.EventsChan():
-			log.Printf("event: %+v", event)
 			if !ok {
 				return
 			}
+			log.Printf("event: %+v", event)
 			responder(&event, nil)
 		case err, ok := <-f.watcher.ErrorsChan():
 			if !ok {

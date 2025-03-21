@@ -17,7 +17,6 @@ type RecordHeader struct {
 
 type Processor interface {
 	Start(ctx context.Context)
-	//Update(module v1.ModuleService)
 	Output() <-chan Result
 	Close()
 }
