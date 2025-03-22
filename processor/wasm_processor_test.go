@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 	v1 "github.com/kjkondratuk/kinetiq/gen/kinetiq/v1"
+	"github.com/kjkondratuk/kinetiq/loader"
 	"github.com/kjkondratuk/kinetiq/source"
 	"github.com/stretchr/testify/mock"
-	"sync"
 	"testing"
 	"time"
 
@@ -25,6 +25,7 @@ func TestWasmProcessor_Output(t *testing.T) {
 func TestWasmProcessor_Start(t *testing.T) {
 	t.Run("process_success", func(t *testing.T) {
 		mockModuleService := &v1.MockmoduleService{}
+		mockLoader := &loader.MockLoader{}
 		mockInputChannel := make(chan source.Record, 1)
 		outputChannel := make(chan Result, 1)
 
@@ -45,12 +46,12 @@ func TestWasmProcessor_Start(t *testing.T) {
 			},
 		}
 		mockModuleService.On("Process", mock.Anything, mock.Anything).Return(expectedResponse, nil)
+		mockLoader.On("Get", mock.Anything).Return(mockModuleService, nil)
 
 		p := &wasmProcessor{
-			plugin: mockModuleService,
+			ldr:    mockLoader,
 			input:  mockInputChannel,
 			output: outputChannel,
-			lock:   sync.Mutex{},
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -68,6 +69,7 @@ func TestWasmProcessor_Start(t *testing.T) {
 
 	t.Run("process_error", func(t *testing.T) {
 		mockModuleService := &v1.MockmoduleService{}
+		mockLoader := &loader.MockLoader{}
 		mockInputChannel := make(chan source.Record, 1)
 		outputChannel := make(chan Result, 1)
 
@@ -81,12 +83,12 @@ func TestWasmProcessor_Start(t *testing.T) {
 		mockInputChannel <- inputRecord
 
 		mockModuleService.On("Process", mock.Anything, mock.Anything).Return(nil, errors.New("processing error"))
+		mockLoader.On("Get", mock.Anything).Return(mockModuleService, nil)
 
 		p := &wasmProcessor{
-			plugin: mockModuleService,
+			ldr:    mockLoader,
 			input:  mockInputChannel,
 			output: outputChannel,
-			lock:   sync.Mutex{},
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -103,22 +105,10 @@ func TestWasmProcessor_Start(t *testing.T) {
 	})
 }
 
-func TestWasmProcessor_Update(t *testing.T) {
-	mockModuleService1 := &v1.MockmoduleService{}
-	mockModuleService2 := &v1.MockmoduleService{}
-
-	p := &wasmProcessor{
-		plugin: mockModuleService1,
-		lock:   sync.Mutex{},
-	}
-
-	p.Update(mockModuleService2)
-	assert.Equal(t, mockModuleService2, p.plugin)
-}
-
 func TestWasmProcessor_process(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		mockModuleService := &v1.MockmoduleService{}
+		mockLoader := &loader.MockLoader{}
 
 		inputRecord := source.Record{
 			Key:   []byte("input-key"),
@@ -137,10 +127,10 @@ func TestWasmProcessor_process(t *testing.T) {
 		}
 
 		mockModuleService.On("Process", mock.Anything, mock.Anything).Return(expectedResponse, nil)
+		mockLoader.On("Get", mock.Anything).Return(mockModuleService, nil)
 
 		p := &wasmProcessor{
-			plugin: mockModuleService,
-			lock:   sync.Mutex{},
+			ldr: mockLoader,
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -157,6 +147,7 @@ func TestWasmProcessor_process(t *testing.T) {
 
 	t.Run("module_service_error", func(t *testing.T) {
 		mockModuleService := &v1.MockmoduleService{}
+		mockLoader := &loader.MockLoader{}
 
 		inputRecord := source.Record{
 			Key:   []byte("input-key"),
@@ -167,10 +158,10 @@ func TestWasmProcessor_process(t *testing.T) {
 		}
 
 		mockModuleService.On("Process", mock.Anything, mock.Anything).Return(nil, errors.New("processing error"))
+		mockLoader.On("Get", mock.Anything).Return(mockModuleService, nil)
 
 		p := &wasmProcessor{
-			plugin: mockModuleService,
-			lock:   sync.Mutex{},
+			ldr: mockLoader,
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -194,13 +185,13 @@ func TestWasmProcessor_Close(t *testing.T) {
 }
 
 func TestNewWasmProcessor(t *testing.T) {
-	mockModuleService := &v1.MockmoduleService{}
+	mockLoader := &loader.MockLoader{}
 	inputChannel := make(chan source.Record)
 
-	p := NewWasmProcessor(mockModuleService, inputChannel)
+	p := NewWasmProcessor(mockLoader, inputChannel)
 	wp, ok := p.(*wasmProcessor)
 	assert.True(t, ok)
-	assert.Equal(t, mockModuleService, wp.plugin)
+	assert.Equal(t, mockLoader, wp.ldr)
 	assert.EqualValues(t, inputChannel, wp.input)
 	assert.NotNil(t, wp.output)
 }

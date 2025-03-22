@@ -2,9 +2,12 @@ package config
 
 import (
 	"errors"
+	"github.com/twmb/franz-go/pkg/kgo"
+	"log"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 var (
@@ -35,6 +38,23 @@ type KafkaConfig struct {
 	SourceTopic   string
 	DestBrokers   []string
 	DestTopic     string
+	Producer      ProducerConfig
+	Consumer      ConsumerConfig
+}
+
+type ProducerConfig struct {
+	Partitioner        string
+	Compression        string
+	BatchMaxBytes      int
+	MaxBufferedRecords int
+	MaxBufferedBytes   int
+	RecordRetries      int
+	TimeoutMs          int
+	LingerMs           int
+	RequiredAcks       string
+}
+
+type ConsumerConfig struct {
 }
 
 func (c configurator) Configure() (Config, error) {
@@ -85,6 +105,8 @@ func (c configurator) Configure() (Config, error) {
 		return Config{}, errors.New("KAFKA_DEST_TOPIC must be different from KAFKA_SOURCE_TOPIC when source and destination kafka sBrokers are the same")
 	}
 
+	compression := os.Getenv("KAFKA_PRODUCER_COMPRESSION")
+
 	return Config{
 		S3: S3Config{
 			Bucket:       sb,
@@ -98,6 +120,110 @@ func (c configurator) Configure() (Config, error) {
 			SourceTopic:   sourceTopic,
 			DestBrokers:   strings.Split(destBrokers, ","),
 			DestTopic:     destTopic,
+			Producer: ProducerConfig{
+				Compression: compression,
+			},
+			Consumer: ConsumerConfig{},
 		},
 	}, nil
+}
+
+func (c configurator) ProducerConfig(conf Config) []kgo.Opt {
+	producerOpts := []kgo.Opt{
+		kgo.DefaultProduceTopic(conf.Kafka.DestTopic),
+		kgo.SeedBrokers(conf.Kafka.DestBrokers...),
+	}
+
+	// Setup compression, if configured
+	if conf.Kafka.Producer.Compression != "" {
+		var comp kgo.CompressionCodec
+		switch conf.Kafka.Producer.Compression {
+		case "gzip":
+			comp = kgo.GzipCompression()
+		case "lz4":
+			comp = kgo.Lz4Compression()
+		case "zstd":
+			comp = kgo.ZstdCompression()
+		case "none":
+			comp = kgo.NoCompression()
+		case "snappy":
+			comp = kgo.SnappyCompression()
+		default:
+			log.Printf("Unsupported compression: %s - defaulting to snappy\n", conf.Kafka.Producer.Compression)
+			comp = kgo.SnappyCompression()
+		}
+		producerOpts = append(producerOpts, kgo.ProducerBatchCompression(comp))
+	}
+
+	// Setup partitioner, if configured
+	if conf.Kafka.Producer.Partitioner != "" {
+		var part kgo.Partitioner
+		switch conf.Kafka.Producer.Partitioner {
+		case "round-robin":
+			part = kgo.RoundRobinPartitioner()
+		case "manual":
+			part = kgo.ManualPartitioner()
+		case "sticky":
+			part = kgo.StickyPartitioner()
+		case "least-backup":
+			part = kgo.LeastBackupPartitioner()
+		default:
+			log.Printf("Unsupported partitioner: %s - defaulting to Kafka native key partitioning", conf.Kafka.Producer.Partitioner)
+			part = kgo.StickyKeyPartitioner(nil)
+		}
+		producerOpts = append(producerOpts, kgo.RecordPartitioner(part))
+	}
+
+	// setup acks, if configured
+	if conf.Kafka.Producer.RequiredAcks != "" {
+		var acks kgo.Acks
+		switch conf.Kafka.Producer.RequiredAcks {
+		case "none":
+			acks = kgo.NoAck()
+		case "leader":
+			acks = kgo.LeaderAck()
+		case "all":
+			acks = kgo.AllISRAcks()
+		default:
+			log.Printf("Unsupported RequiredAcks: %s - defaulting to all", conf.Kafka.Producer.RequiredAcks)
+			acks = kgo.AllISRAcks()
+
+		}
+		producerOpts = append(producerOpts, kgo.RequiredAcks(acks))
+	}
+
+	if conf.Kafka.Producer.BatchMaxBytes != 0 {
+		producerOpts = append(producerOpts, kgo.ProducerBatchMaxBytes(int32(conf.Kafka.Producer.BatchMaxBytes)))
+	}
+
+	if conf.Kafka.Producer.MaxBufferedRecords != 0 {
+		producerOpts = append(producerOpts, kgo.MaxBufferedRecords(int(conf.Kafka.Producer.MaxBufferedRecords)))
+	}
+
+	if conf.Kafka.Producer.MaxBufferedBytes != 0 {
+		producerOpts = append(producerOpts, kgo.MaxBufferedBytes(int(conf.Kafka.Producer.MaxBufferedBytes)))
+	}
+
+	if conf.Kafka.Producer.TimeoutMs != 0 {
+		producerOpts = append(producerOpts, kgo.ProduceRequestTimeout(time.Duration(conf.Kafka.Producer.TimeoutMs)*time.Millisecond))
+	}
+
+	if conf.Kafka.Producer.RecordRetries != 0 {
+		producerOpts = append(producerOpts, kgo.RecordRetries(conf.Kafka.Producer.RecordRetries))
+	}
+
+	if conf.Kafka.Producer.LingerMs != 0 {
+		producerOpts = append(producerOpts, kgo.ProducerLinger(time.Duration(conf.Kafka.Producer.LingerMs)*time.Millisecond))
+	}
+
+	return producerOpts
+}
+
+func (c configurator) ConsumerConfig(conf Config) []kgo.Opt {
+	consumerOpts := []kgo.Opt{
+		kgo.ConsumeTopics(conf.Kafka.SourceTopic),
+		kgo.SeedBrokers(conf.Kafka.SourceBrokers...),
+	}
+
+	return consumerOpts
 }

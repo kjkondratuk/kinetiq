@@ -5,7 +5,6 @@ package processor
 import (
 	context "context"
 
-	v1 "github.com/kjkondratuk/kinetiq/gen/kinetiq/v1"
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -130,39 +129,6 @@ func (_c *MockProcessor_Start_Call) Return() *MockProcessor_Start_Call {
 }
 
 func (_c *MockProcessor_Start_Call) RunAndReturn(run func(context.Context)) *MockProcessor_Start_Call {
-	_c.Run(run)
-	return _c
-}
-
-// Update provides a mock function with given fields: module
-func (_m *MockProcessor) Update(module v1.ModuleService) {
-	_m.Called(module)
-}
-
-// MockProcessor_Update_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Update'
-type MockProcessor_Update_Call struct {
-	*mock.Call
-}
-
-// Update is a helper method to define mock.On call
-//   - module v1.ModuleService
-func (_e *MockProcessor_Expecter) Update(module interface{}) *MockProcessor_Update_Call {
-	return &MockProcessor_Update_Call{Call: _e.mock.On("Update", module)}
-}
-
-func (_c *MockProcessor_Update_Call) Run(run func(module v1.ModuleService)) *MockProcessor_Update_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(v1.ModuleService))
-	})
-	return _c
-}
-
-func (_c *MockProcessor_Update_Call) Return() *MockProcessor_Update_Call {
-	_c.Call.Return()
-	return _c
-}
-
-func (_c *MockProcessor_Update_Call) RunAndReturn(run func(v1.ModuleService)) *MockProcessor_Update_Call {
 	_c.Run(run)
 	return _c
 }

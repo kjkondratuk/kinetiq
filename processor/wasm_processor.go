@@ -4,21 +4,21 @@ import (
 	"context"
 	"fmt"
 	v1 "github.com/kjkondratuk/kinetiq/gen/kinetiq/v1"
+	"github.com/kjkondratuk/kinetiq/loader"
 	"github.com/kjkondratuk/kinetiq/source"
 	"log"
-	"sync"
 )
 
 type wasmProcessor struct {
-	plugin v1.ModuleService
-	lock   sync.Mutex
+	ldr loader.Loader
+	//lock   sync.Mutex
 	input  <-chan source.Record
 	output chan Result
 }
 
-func NewWasmProcessor(plugin v1.ModuleService, channel <-chan source.Record) Processor {
+func NewWasmProcessor(ldr loader.Loader, channel <-chan source.Record) Processor {
 	p := &wasmProcessor{
-		plugin: plugin,
+		ldr:    ldr,
 		input:  channel,
 		output: make(chan Result),
 	}
@@ -37,9 +37,9 @@ func (p *wasmProcessor) Start(ctx context.Context) {
 			return
 		case input := <-p.input:
 			// TODO : can probably improve performance by not locking on each message and instead signalling a stop of this loop and a restart
-			p.lock.Lock()
+			//p.lock.Lock()
 			process, err := p.process(ctx, input)
-			p.lock.Unlock()
+			//p.lock.Unlock()
 			if err != nil {
 				log.Println("error processing record: %w", err)
 				continue
@@ -47,12 +47,6 @@ func (p *wasmProcessor) Start(ctx context.Context) {
 			p.output <- process
 		}
 	}
-}
-
-func (p *wasmProcessor) Update(module v1.ModuleService) {
-	p.lock.Lock()
-	p.plugin = module
-	p.lock.Unlock()
 }
 
 func (p *wasmProcessor) process(ctx context.Context, record source.Record) (Result, error) {
@@ -71,7 +65,12 @@ func (p *wasmProcessor) process(ctx context.Context, record source.Record) (Resu
 		Headers: headers,
 	}
 
-	res, err := p.plugin.Process(ctx, req)
+	processor, err := p.ldr.Get(ctx)
+	if err != nil {
+		return Result{}, fmt.Errorf("error getting processor: %w", err)
+	}
+
+	res, err := processor.Process(ctx, req)
 	if err != nil {
 		return Result{}, fmt.Errorf("error processing record: %w", err)
 	}
