@@ -42,7 +42,7 @@ func main() {
 		dl = loader.NewS3Loader(s3Client, appCfg.S3.Bucket, appCfg.PluginRef)
 		//dl.Resolve(ctx)
 	} else {
-		dl = loader.NewFilesystemLoader(appCfg.PluginRef)
+		dl = loader.NewBasicReloader(appCfg.PluginRef)
 	}
 	defer dl.Close(ctx)
 

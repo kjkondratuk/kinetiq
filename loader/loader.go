@@ -11,23 +11,13 @@ import (
 	"sync"
 )
 
-type lazyReloader struct {
-	Loader
-	closeablePlugin
-	mutex sync.Mutex
-	path  string
+type defaultPluginLoader struct{}
+
+type pluginLoader interface {
+	load(ctx context.Context, mutex *sync.Mutex, path string) (closeablePlugin, error)
 }
 
-func newReloader(path string) lazyReloader {
-	return lazyReloader{path: path}
-}
-
-type closeablePlugin interface {
-	Close(ctx context.Context) error
-	v1.ModuleService
-}
-
-func initialize(ctx context.Context) *v1.ModuleServicePlugin {
+func (l *defaultPluginLoader) load(ctx context.Context, mutex *sync.Mutex, path string) (closeablePlugin, error) {
 	plugin, err := v1.NewModuleServicePlugin(ctx, v1.WazeroModuleConfig(
 		wazero.NewModuleConfig().
 			WithStartFunctions("_initialize", "_start"). // unclear why adding this made things work... It should be doing this anyway...
@@ -38,26 +28,47 @@ func initialize(ctx context.Context) *v1.ModuleServicePlugin {
 		log.Fatal("Failed to setup plugin environment", err)
 	}
 	log.Printf("Plugin environment setup...\n")
-	return plugin
-}
-
-func (r *lazyReloader) load(ctx context.Context) (closeablePlugin, error) {
-	pl := initialize(ctx)
 
 	// don't allow loading and retrieval at the same time
-	r.mutex.Lock()
-	l, err := pl.Load(ctx, r.path, functions.NewDefaultPluginFunctions())
-	r.mutex.Unlock()
+	mutex.Lock()
+	ld, err := plugin.Load(ctx, path, functions.NewDefaultPluginFunctions())
+	mutex.Unlock()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load plugin: %w", err)
 	}
 
-	r.closeablePlugin = l
-	return r.closeablePlugin, nil
+	return ld, nil
+}
+
+type lazyReloader struct {
+	Loader
+	closeablePlugin
+	pluginLoader
+	mutex sync.Mutex
+	path  string
+}
+
+func newReloader(path string) lazyReloader {
+	return lazyReloader{path: path, pluginLoader: &defaultPluginLoader{}}
+}
+
+func NewBasicReloader(path string) Loader {
+	r := newReloader(path)
+	return &r
+}
+
+type closeablePlugin interface {
+	Close(ctx context.Context) error
+	v1.ModuleService
+}
+
+func (r *lazyReloader) Resolve(ctx context.Context) {
+	// empty because we don't need to resolve local files
+	fmt.Println("Resolving local file")
 }
 
 func (r *lazyReloader) Get(ctx context.Context) (v1.ModuleService, error) {
-	var plugin v1.ModuleService
+	var plugin closeablePlugin
 	if r.closeablePlugin != nil {
 		// don't allow loading and retrieval at the same time
 		r.mutex.Lock()
@@ -65,10 +76,11 @@ func (r *lazyReloader) Get(ctx context.Context) (v1.ModuleService, error) {
 		r.mutex.Unlock()
 	} else {
 		var err error
-		plugin, err = r.load(ctx)
+		plugin, err = r.load(ctx, &r.mutex, r.path)
 		if err != nil {
 			return nil, err
 		}
+		r.closeablePlugin = plugin
 	}
 
 	return plugin, nil
@@ -78,15 +90,17 @@ func (r *lazyReloader) Reload(ctx context.Context) error {
 	r.Resolve(ctx)
 
 	// Close existing plugin if loaded, since we're reloading
-	err := r.closeablePlugin.Close(ctx)
+	err := r.Close(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to close plugin for reload: %w", err)
 	}
 
-	_, err = r.load(ctx)
+	ld, err := r.load(ctx, &r.mutex, r.path)
 	if err != nil {
 		return fmt.Errorf("failed to reload plugin: %w", err)
 	}
+
+	r.closeablePlugin = ld
 
 	return nil
 }
