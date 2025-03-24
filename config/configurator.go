@@ -222,7 +222,7 @@ func (c configurator) Configure(ctx context.Context) (Config, error) {
 	return cfg, nil
 }
 
-func (c configurator) SharedKafkaConfig(conf SharedKafkaConfig, name string, awsConf *aws.Config) []kgo.Opt {
+func (c configurator) CreateKafkaClientOptions(conf SharedKafkaConfig, name string, awsConf *aws.Config) []kgo.Opt {
 	opts := []kgo.Opt{}
 
 	// validate SASL opts
@@ -309,7 +309,7 @@ func (c configurator) ProducerConfig(conf Config) []kgo.Opt {
 		kgo.SeedBrokers(conf.Kafka.DestBrokers...),
 	}
 
-	shared := c.SharedKafkaConfig(conf.Kafka.Producer.SharedKafkaConfig, "PRODUCER", conf.Aws)
+	shared := c.CreateKafkaClientOptions(conf.Kafka.Producer.SharedKafkaConfig, "PRODUCER", conf.Aws)
 	producerOpts = append(producerOpts, shared...)
 
 	// TODO : figure out how to test this or refactor since the configuration isn't exposed for validation
@@ -404,7 +404,7 @@ func (c configurator) ConsumerConfig(conf Config) []kgo.Opt {
 		kgo.SeedBrokers(conf.Kafka.SourceBrokers...),
 	}
 
-	shared := c.SharedKafkaConfig(conf.Kafka.Consumer.SharedKafkaConfig, "CONSUMER", conf.Aws)
+	shared := c.CreateKafkaClientOptions(conf.Kafka.Consumer.SharedKafkaConfig, "CONSUMER", conf.Aws)
 	consumerOpts = append(consumerOpts, shared...)
 
 	if len(conf.Kafka.Consumer.Topics) > 0 {
