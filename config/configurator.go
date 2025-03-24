@@ -8,8 +8,12 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/twmb/franz-go/pkg/kgo"
 	kaws "github.com/twmb/franz-go/pkg/sasl/aws"
+	"github.com/twmb/franz-go/pkg/sasl/oauth"
+	"github.com/twmb/franz-go/pkg/sasl/plain"
+	"github.com/twmb/franz-go/pkg/sasl/scram"
 	"log"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -69,12 +73,18 @@ type ConsumerConfig struct {
 }
 
 type SharedKafkaConfig struct {
-	DialTimeoutMs int
-	MSKEnabled    bool
-	TLSEnabled    bool
+	SASLMechanism   string
+	SASLUser        string
+	SASLPassword    string
+	SASLToken       string
+	SASLTokenAuth   bool
+	OAuthExtensions map[string]string
+	SASLZid         string
+	DialTimeoutMs   int
+	TLSEnabled      bool
 }
 
-var basicMskAuthorizer = func(conf *aws.Config) func(ctx context.Context) (kaws.Auth, error) {
+var basicMskMechanism = func(conf *aws.Config) func(ctx context.Context) (kaws.Auth, error) {
 	return func(ctx context.Context) (kaws.Auth, error) {
 		cred, err := conf.Credentials.Retrieve(ctx)
 		if err != nil {
@@ -126,7 +136,6 @@ func (c configurator) Configure(ctx context.Context) (Config, error) {
 
 	// setup producer
 	producerCompression := os.Getenv("KAFKA_PRODUCER_COMPRESSION")
-	producerMskEnabled := truthy("KAFKA_PRODUCER_MSK_ENABLED")
 	producerDialTimeoutMs := getEnvOrDefault("KAFKA_PRODUCER_DIAL_TIMEOUT_MS", 0)
 	producerTlsEnabled := truthy("KAFKA_PRODUCER_TLS_ENABLED")
 	producerBatchMaxBytes := getEnvOrDefault("KAFKA_PRODUCER_BATCH_MAX_BYTES", 0)
@@ -136,14 +145,17 @@ func (c configurator) Configure(ctx context.Context) (Config, error) {
 	producerTimeoutMs := getEnvOrDefault("KAFKA_PRODUCER_TIMEOUT_MS", 0)
 	producerLingerMs := getEnvOrDefault("KAFKA_PRODUCER_LINGER_MS", 0)
 	producerRequredAcks := os.Getenv("KAFKA_PRODUCER_REQUIRED_ACKS")
+	producerSaslMechanism := os.Getenv("KAFKA_PRODUCER_SASL_MECHANISM")
+	producerOAuthExtensions := parseMap("KAFKA_PRODUCER_OAUTH_EXTENSIONS")
 
 	// setup consumer
-	consumerMskEnabled := truthy("KAFKA_CONSUMER_MSK_ENABLED")
 	consumerDialTimeoutMs := getEnvOrDefault("KAFKA_CONSUMER_DIAL_TIMEOUT_MS", 0)
 	consumerTlsEnabled := truthy("KAFKA_CONSUMER_TLS_ENABLED")
 	consumerTopics := getList("KAFKA_CONSUMER_TOPICS")
 	consumerGroup := getEnvOrDefault("KAFKA_CONSUMER_GROUP", "")
 	consumerOffset := getEnvOrDefault("KAFKA_CONSUMER_OFFSET", "")
+	consumerSaslMechanism := os.Getenv("KAFKA_CONSUMER_SASL_MECHANISM")
+	consumerOAuthExtensions := parseMap("KAFKA_CONSUMER_OAUTH_EXTENSIONS")
 
 	cfg := Config{
 		S3: S3Config{
@@ -160,9 +172,15 @@ func (c configurator) Configure(ctx context.Context) (Config, error) {
 			DestTopic:     destTopic,
 			Producer: ProducerConfig{
 				SharedKafkaConfig: SharedKafkaConfig{
-					DialTimeoutMs: producerDialTimeoutMs,
-					MSKEnabled:    producerMskEnabled,
-					TLSEnabled:    producerTlsEnabled,
+					SASLMechanism:   producerSaslMechanism,
+					SASLUser:        os.Getenv("KAFKA_PRODUCER_SASL_USER"),
+					SASLPassword:    os.Getenv("KAFKA_PRODUCER_SASL_PASSWORD"),
+					SASLToken:       os.Getenv("KAFKA_PRODUCER_SASL_TOKEN"),
+					SASLZid:         os.Getenv("KAFKA_PRODUCER_SASL_ZID"),
+					SASLTokenAuth:   truthy("KAFKA_PRODUCER_SASL_TOKEN_AUTH"),
+					OAuthExtensions: producerOAuthExtensions,
+					DialTimeoutMs:   producerDialTimeoutMs,
+					TLSEnabled:      producerTlsEnabled,
 				},
 				Compression:        producerCompression,
 				BatchMaxBytes:      producerBatchMaxBytes,
@@ -175,9 +193,15 @@ func (c configurator) Configure(ctx context.Context) (Config, error) {
 			},
 			Consumer: ConsumerConfig{
 				SharedKafkaConfig: SharedKafkaConfig{
-					DialTimeoutMs: consumerDialTimeoutMs,
-					MSKEnabled:    consumerMskEnabled,
-					TLSEnabled:    consumerTlsEnabled,
+					SASLMechanism:   consumerSaslMechanism,
+					SASLUser:        os.Getenv("KAFKA_CONSUMER_SASL_USER"),
+					SASLPassword:    os.Getenv("KAFKA_CONSUMER_SASL_PASSWORD"),
+					SASLToken:       os.Getenv("KAFKA_CONSUMER_SASL_TOKEN"),
+					SASLZid:         os.Getenv("KAFKA_CONSUMER_SASL_ZID"),
+					SASLTokenAuth:   truthy("KAFKA_CONSUMER_SASL_TOKEN_AUTH"),
+					OAuthExtensions: consumerOAuthExtensions,
+					DialTimeoutMs:   consumerDialTimeoutMs,
+					TLSEnabled:      consumerTlsEnabled,
 				},
 				Topics: consumerTopics,
 				Group:  consumerGroup,
@@ -186,7 +210,8 @@ func (c configurator) Configure(ctx context.Context) (Config, error) {
 		},
 	}
 
-	if s3Enabled || consumerMskEnabled || producerMskEnabled {
+	// configure default AWS configuration for anything that requires it
+	if s3Enabled || producerSaslMechanism == "aws-msk" || consumerSaslMechanism == "aws-msk" {
 		c, err := config.LoadDefaultConfig(ctx)
 		if err != nil {
 			log.Fatalf("failed to load AWS config: %e", err)
@@ -197,11 +222,60 @@ func (c configurator) Configure(ctx context.Context) (Config, error) {
 	return cfg, nil
 }
 
-func (c configurator) SharedKafkaConfig(conf SharedKafkaConfig, awsConf *aws.Config) []kgo.Opt {
+func (c configurator) SharedKafkaConfig(conf SharedKafkaConfig, name string, awsConf *aws.Config) []kgo.Opt {
 	opts := []kgo.Opt{}
 
-	if conf.MSKEnabled {
-		opts = append(opts, kgo.SASL(kaws.ManagedStreamingIAM(basicMskAuthorizer(awsConf))))
+	// validate SASL opts
+	if conf.SASLMechanism != "" {
+		saslTypes := []string{"plain", "sasl-scram-512", "sasl-scram-256"}
+		if slices.Contains(saslTypes, conf.SASLMechanism) &&
+			conf.SASLUser == "" {
+			log.Fatalf("%s_SASL_MECHANISM %s requires %s_SASL_USER to be set", name, conf.SASLMechanism, name)
+		}
+
+		if slices.Contains(saslTypes, conf.SASLMechanism) && conf.SASLPassword == "" {
+			log.Fatalf("%s_SASL_MECHANISM %s requires %s_SASL_PASSWORD to be set", name, conf.SASLMechanism, name)
+		}
+
+		if conf.SASLMechanism == "oauth" && conf.SASLToken == "" {
+			log.Fatalf("%s_SASL_MECHANISM %s requires %s_SASL_TOKEN to be set", name, conf.SASLMechanism, name)
+		}
+
+		if conf.SASLMechanism == "aws-msk" && awsConf == nil {
+			log.Fatalf("%s_SASL_MECHANISM %s requires a valid AWS config", name, conf.SASLMechanism)
+		}
+	}
+
+	// select and configure authentication mechanism based on
+	switch conf.SASLMechanism {
+	case "plain":
+		opts = append(opts, kgo.SASL(plain.Auth{
+			Zid:  conf.SASLZid,
+			User: conf.SASLUser,
+			Pass: conf.SASLPassword,
+		}.AsMechanism()))
+	case "sasl-scram-512":
+		opts = append(opts, kgo.SASL(scram.Auth{
+			Zid:     conf.SASLZid,
+			User:    conf.SASLUser,
+			Pass:    conf.SASLPassword,
+			IsToken: conf.SASLTokenAuth,
+		}.AsSha512Mechanism()))
+	case "sasl-scram-256":
+		opts = append(opts, kgo.SASL(scram.Auth{
+			Zid:     conf.SASLZid,
+			User:    conf.SASLUser,
+			Pass:    conf.SASLPassword,
+			IsToken: conf.SASLTokenAuth,
+		}.AsSha256Mechanism()))
+	case "oauth":
+		opts = append(opts, kgo.SASL(oauth.Auth{
+			Zid:        conf.SASLZid,
+			Token:      conf.SASLToken,
+			Extensions: conf.OAuthExtensions,
+		}.AsMechanism()))
+	case "aws-msk":
+		opts = append(opts, kgo.SASL(kaws.ManagedStreamingIAM(basicMskMechanism(awsConf))))
 	}
 
 	if conf.TLSEnabled {
@@ -238,7 +312,7 @@ func (c configurator) ProducerConfig(conf Config) []kgo.Opt {
 		kgo.SeedBrokers(conf.Kafka.DestBrokers...),
 	}
 
-	shared := c.SharedKafkaConfig(conf.Kafka.Producer.SharedKafkaConfig, conf.Aws)
+	shared := c.SharedKafkaConfig(conf.Kafka.Producer.SharedKafkaConfig, "PRODUCER", conf.Aws)
 	producerOpts = append(producerOpts, shared...)
 
 	// TODO : figure out how to test this or refactor since the configuration isn't exposed for validation
@@ -333,7 +407,7 @@ func (c configurator) ConsumerConfig(conf Config) []kgo.Opt {
 		kgo.SeedBrokers(conf.Kafka.SourceBrokers...),
 	}
 
-	shared := c.SharedKafkaConfig(conf.Kafka.Consumer.SharedKafkaConfig, conf.Aws)
+	shared := c.SharedKafkaConfig(conf.Kafka.Consumer.SharedKafkaConfig, "CONSUMER", conf.Aws)
 	consumerOpts = append(consumerOpts, shared...)
 
 	if len(conf.Kafka.Consumer.Topics) > 0 {
@@ -429,4 +503,24 @@ func getList(key string) []string {
 		return []string{}
 	}
 	return strings.Split(v, ",")
+}
+
+func parseMap(key string) map[string]string {
+	result := make(map[string]string)
+	if envValue := os.Getenv(key); envValue != "" {
+		pairs := strings.Split(envValue, ",")
+		for _, pair := range pairs {
+			kv := strings.SplitN(pair, "=", 2)
+			if len(kv) == 2 {
+				k := strings.TrimSpace(kv[0])
+				v := strings.TrimSpace(kv[1])
+				if k != "" {
+					result[key] = v
+				}
+			} else {
+				log.Fatalf("Invalid map value specified for: key: %s - value: %s", key, pair)
+			}
+		}
+	}
+	return result
 }
