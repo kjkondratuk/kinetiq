@@ -48,7 +48,9 @@ func main() {
 
 	log.Print("Plugin environment loaded...\n")
 
+	sharedOpts := app_config.DefaultConfigurator.SharedKafkaConfig(appCfg)
 	consumerOpts := app_config.DefaultConfigurator.ConsumerConfig(appCfg)
+	consumerOpts = append(consumerOpts, sharedOpts...)
 
 	log.Printf("Connecting to kafka source brokers: %s", appCfg.Kafka.SourceBrokers)
 	readerClient, err := kgo.NewClient(consumerOpts...)
@@ -72,6 +74,7 @@ func main() {
 	log.Printf("Connecting to kafka dest brokers: %s", appCfg.Kafka.DestBrokers)
 
 	producerOpts := app_config.DefaultConfigurator.ProducerConfig(appCfg)
+	producerOpts = append(producerOpts, sharedOpts...)
 
 	writerClient, err := kgo.NewClient(
 		producerOpts...,
