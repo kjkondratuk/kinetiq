@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/fsnotify/fsnotify"
@@ -21,26 +20,20 @@ import (
 )
 
 func main() {
-	appCfg, err := app_config.DefaultConfigurator.Configure()
-	if err != nil {
-		log.Fatalf("Failed to load configuration: %s", err)
-	}
-
 	ctx := context.Background()
 
-	cfg, err := config.LoadDefaultConfig(ctx)
+	appCfg, err := app_config.DefaultConfigurator.Configure(ctx)
 	if err != nil {
-		log.Fatalf("failed to load AWS config: %e", err)
+		log.Fatalf("Failed to load configuration: %s", err)
 	}
 
 	var dl loader.Loader
 	// download initial copy of the module
 	if appCfg.S3.Enabled {
-		s3Client := s3.NewFromConfig(cfg)
+		s3Client := s3.NewFromConfig(*appCfg.Aws) // this value will be set if the configuration requires AWS
 
 		// TODO : eat up SQS queue so we don't load changes more than once on startup (if there's a change backlog)
 		dl = loader.NewS3Loader(s3Client, appCfg.S3.Bucket, appCfg.PluginRef)
-		//dl.Resolve(ctx)
 	} else {
 		dl = loader.NewBasicReloader(appCfg.PluginRef)
 	}
@@ -48,9 +41,7 @@ func main() {
 
 	log.Print("Plugin environment loaded...\n")
 
-	sharedOpts := app_config.DefaultConfigurator.SharedKafkaConfig(appCfg)
 	consumerOpts := app_config.DefaultConfigurator.ConsumerConfig(appCfg)
-	consumerOpts = append(consumerOpts, sharedOpts...)
 
 	log.Printf("Connecting to kafka source brokers: %s", appCfg.Kafka.SourceBrokers)
 	readerClient, err := kgo.NewClient(consumerOpts...)
@@ -74,7 +65,6 @@ func main() {
 	log.Printf("Connecting to kafka dest brokers: %s", appCfg.Kafka.DestBrokers)
 
 	producerOpts := app_config.DefaultConfigurator.ProducerConfig(appCfg)
-	producerOpts = append(producerOpts, sharedOpts...)
 
 	writerClient, err := kgo.NewClient(
 		producerOpts...,
@@ -104,7 +94,7 @@ func main() {
 
 	if appCfg.S3.Enabled {
 		// listen for changes from S3
-		sqsClient := sqs.NewFromConfig(cfg)
+		sqsClient := sqs.NewFromConfig(*appCfg.Aws) // this value will be configured if AWS SDK is required
 
 		opts := []detection.SqsWatcherOpt{}
 
