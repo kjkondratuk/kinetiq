@@ -47,6 +47,7 @@ This project is very much a work-in-progress currently, but you can track the pr
 
 Please check out [issues](https://github.com/kjkondratuk/kinetiq/issues) to see what we're working on!
 
+
 # Plugins
 
 This project utilizes web assembly modules to support dynamic reloading of the application logic, and uses protocol buffers
