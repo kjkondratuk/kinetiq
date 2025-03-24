@@ -81,7 +81,7 @@ func TestConfigurator_Configure(t *testing.T) {
 				"KAFKA_DEST_TOPIC":     "topic",
 			},
 			wantErr:   true,
-			errPrefix: "KAFKA_DEST_TOPIC must be different",
+			errPrefix: "KAFKA_DEST_TOPIC must be different from KAFKA_SOURCE_TOPIC and must be set when KAFKA_SOURCE_BROKERS and KAFKA_DEST_BROKERS are the same",
 		},
 		{
 			name: "default kafka source brokers",
@@ -108,7 +108,7 @@ func TestConfigurator_Configure(t *testing.T) {
 			}()
 
 			c := configurator{}
-			_, err := c.Configure()
+			_, err := c.Configure(t.Context())
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Configure() error = %v, wantErr %v", err, tt.wantErr)
 				return

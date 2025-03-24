@@ -1,8 +1,13 @@
 package config
 
 import (
+	"context"
 	"errors"
+	"fmt"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/twmb/franz-go/pkg/kgo"
+	kaws "github.com/twmb/franz-go/pkg/sasl/aws"
 	"log"
 	"os"
 	"strconv"
@@ -21,6 +26,7 @@ type Configurator interface {
 }
 
 type Config struct {
+	Aws       *aws.Config
 	S3        S3Config
 	PluginRef string
 	Kafka     KafkaConfig
@@ -57,65 +63,89 @@ type ProducerConfig struct {
 
 type ConsumerConfig struct {
 	SharedKafkaConfig
-	Topics string
+	Topics []string
 	Group  string
 	Offset string
 }
 
 type SharedKafkaConfig struct {
+	DialTimeoutMs int
+	MSKEnabled    bool
+	TLSEnabled    bool
 }
 
-func (c configurator) Configure() (Config, error) {
-	var s3Enabled bool
-	s := os.Getenv("S3_INTEGRATION_ENABLED")
-	if s != "" {
-		s3Enabled = true
+var basicMskAuthorizer = func(conf *aws.Config) func(ctx context.Context) (kaws.Auth, error) {
+	return func(ctx context.Context) (kaws.Auth, error) {
+		cred, err := conf.Credentials.Retrieve(ctx)
+		if err != nil {
+			return kaws.Auth{}, fmt.Errorf("failed to retrieve AWS credentials: %w", err)
+		}
+
+		return kaws.Auth{
+			AccessKey:    cred.AccessKeyID,
+			SecretKey:    cred.SecretAccessKey,
+			SessionToken: cred.SessionToken,
+		}, nil
+	}
+}
+
+func (c configurator) Configure(ctx context.Context) (Config, error) {
+	s3Enabled := getEnvOrDefault("S3_INTEGRATION_ENABLED", false)
+
+	sb, err := getOrErrorOnValueAndCondition("S3_INTEGRATION_BUCKET", "", s3Enabled,
+		errors.New("S3_INTEGRATION_BUCKET must be set when S3_INTEGRATION_ENABLED is set"))
+	if err != nil {
+		return Config{}, err
 	}
 
-	sb := os.Getenv("S3_INTEGRATION_BUCKET")
-	if s3Enabled && sb == "" {
-		return Config{}, errors.New("S3_INTEGRATION_BUCKET must be set when S3_INTEGRATION_ENABLED is set")
+	cq, err := getOrErrorOnValueAndCondition("S3_INTEGRATION_CHANGE_QUEUE", "", s3Enabled,
+		errors.New("S3_INTEGRATION_CHANGE_QUEUE must be set when S3_INTEGRATION_ENABLED is set"))
+	if err != nil {
+		return Config{}, err
 	}
 
-	cq := os.Getenv("S3_INTEGRATION_CHANGE_QUEUE")
-	if s3Enabled && cq == "" {
-		return Config{}, errors.New("S3_INTEGRATION_CHANGE_QUEUE must be set when S3_INTEGRATION_ENABLED is set")
+	pollingInterval := getEnvOrDefault("S3_INTEGRATION_POLL_INTERVAL", 10)
+	pluginRef, err := require("PLUGIN_REF", errors.New("PLUGIN_REF must be set"))
+	if err != nil {
+		return Config{}, err
 	}
 
-	pollingInterval := 10
-	pollingIntervalStr := os.Getenv("S3_INTEGRATION_POLL_INTERVAL")
-	if s3Enabled && pollingIntervalStr != "" {
-		pollingInterval, _ = strconv.Atoi(pollingIntervalStr)
+	sourceBrokers := getEnvOrDefault("KAFKA_SOURCE_BROKERS", "localhost:49092")
+	sourceTopic, err := require("KAFKA_SOURCE_TOPIC", errors.New("KAFKA_SOURCE_TOPIC must be set"))
+	if err != nil {
+		return Config{}, err
 	}
 
-	pluginRef := os.Getenv("PLUGIN_REF")
-	if pluginRef == "" {
-		return Config{}, errors.New("PLUGIN_REF must be set")
+	destBrokers := getEnvOrDefault("KAFKA_DEST_BROKERS", sourceBrokers)
+	destTopic, err := getOrErrorOnValueAndCondition("KAFKA_DEST_TOPIC", sourceTopic, sourceBrokers == destBrokers,
+		errors.New("KAFKA_DEST_TOPIC must be different from KAFKA_SOURCE_TOPIC and must be set when "+
+			"KAFKA_SOURCE_BROKERS and KAFKA_DEST_BROKERS are the same"))
+	if err != nil {
+		return Config{}, err
 	}
 
-	sourceBrokers := os.Getenv("KAFKA_SOURCE_BROKERS")
-	if sourceBrokers == "" {
-		sourceBrokers = "localhost:49092"
-	}
+	// setup producer
+	producerCompression := os.Getenv("KAFKA_PRODUCER_COMPRESSION")
+	producerMskEnabled := truthy("KAFKA_PRODUCER_MSK_ENABLED")
+	producerDialTimeoutMs := getEnvOrDefault("KAFKA_PRODUCER_DIAL_TIMEOUT_MS", 0)
+	producerTlsEnabled := truthy("KAFKA_PRODUCER_TLS_ENABLED")
+	producerBatchMaxBytes := getEnvOrDefault("KAFKA_PRODUCER_BATCH_MAX_BYTES", 0)
+	producerMaxBufferedRecords := getEnvOrDefault("KAFKA_PRODUCER_MAX_BUFFERED_RECORDS", 0)
+	producerMaxBufferedBytes := getEnvOrDefault("KAFKA_PRODUCER_MAX_BUFFERED_BYTES", 0)
+	producerRecordRetries := getEnvOrDefault("KAFKA_PRODUCER_RECORD_RETRIES", 0)
+	producerTimeoutMs := getEnvOrDefault("KAFKA_PRODUCER_TIMEOUT_MS", 0)
+	producerLingerMs := getEnvOrDefault("KAFKA_PRODUCER_LINGER_MS", 0)
+	producerRequredAcks := os.Getenv("KAFKA_PRODUCER_REQUIRED_ACKS")
 
-	sourceTopic := os.Getenv("KAFKA_SOURCE_TOPIC")
-	if sourceTopic == "" {
-		return Config{}, errors.New("KAFKA_SOURCE_TOPIC must be set")
-	}
+	// setup consumer
+	consumerMskEnabled := truthy("KAFKA_CONSUMER_MSK_ENABLED")
+	consumerDialTimeoutMs := getEnvOrDefault("KAFKA_CONSUMER_DIAL_TIMEOUT_MS", 0)
+	consumerTlsEnabled := truthy("KAFKA_CONSUMER_TLS_ENABLED")
+	consumerTopics := getList("KAFKA_CONSUMER_TOPICS")
+	consumerGroup := getEnvOrDefault("KAFKA_CONSUMER_GROUP", "")
+	consumerOffset := getEnvOrDefault("KAFKA_CONSUMER_OFFSET", "")
 
-	destBrokers := os.Getenv("KAFKA_DEST_BROKERS")
-	if destBrokers == "" {
-		destBrokers = sourceBrokers
-	}
-
-	destTopic := os.Getenv("KAFKA_DEST_TOPIC")
-	if sourceBrokers == destBrokers && destTopic == sourceTopic {
-		return Config{}, errors.New("KAFKA_DEST_TOPIC must be different from KAFKA_SOURCE_TOPIC when source and destination kafka sBrokers are the same")
-	}
-
-	compression := os.Getenv("KAFKA_PRODUCER_COMPRESSION")
-
-	return Config{
+	cfg := Config{
 		S3: S3Config{
 			Bucket:       sb,
 			Enabled:      s3Enabled,
@@ -129,15 +159,58 @@ func (c configurator) Configure() (Config, error) {
 			DestBrokers:   strings.Split(destBrokers, ","),
 			DestTopic:     destTopic,
 			Producer: ProducerConfig{
-				Compression: compression,
+				SharedKafkaConfig: SharedKafkaConfig{
+					DialTimeoutMs: producerDialTimeoutMs,
+					MSKEnabled:    producerMskEnabled,
+					TLSEnabled:    producerTlsEnabled,
+				},
+				Compression:        producerCompression,
+				BatchMaxBytes:      producerBatchMaxBytes,
+				MaxBufferedRecords: producerMaxBufferedRecords,
+				MaxBufferedBytes:   producerMaxBufferedBytes,
+				RecordRetries:      producerRecordRetries,
+				TimeoutMs:          producerTimeoutMs,
+				LingerMs:           producerLingerMs,
+				RequiredAcks:       producerRequredAcks,
 			},
-			Consumer: ConsumerConfig{},
+			Consumer: ConsumerConfig{
+				SharedKafkaConfig: SharedKafkaConfig{
+					DialTimeoutMs: consumerDialTimeoutMs,
+					MSKEnabled:    consumerMskEnabled,
+					TLSEnabled:    consumerTlsEnabled,
+				},
+				Topics: consumerTopics,
+				Group:  consumerGroup,
+				Offset: consumerOffset,
+			},
 		},
-	}, nil
+	}
+
+	if s3Enabled || consumerMskEnabled || producerMskEnabled {
+		c, err := config.LoadDefaultConfig(ctx)
+		if err != nil {
+			log.Fatalf("failed to load AWS config: %e", err)
+		}
+		cfg.Aws = &c
+	}
+
+	return cfg, nil
 }
 
-func (c configurator) SharedKafkaConfig(conf Config) []kgo.Opt {
+func (c configurator) SharedKafkaConfig(conf SharedKafkaConfig, awsConf *aws.Config) []kgo.Opt {
 	opts := []kgo.Opt{}
+
+	if conf.MSKEnabled {
+		opts = append(opts, kgo.SASL(kaws.ManagedStreamingIAM(basicMskAuthorizer(awsConf))))
+	}
+
+	if conf.TLSEnabled {
+		opts = append(opts, kgo.DialTLS())
+	}
+
+	if conf.DialTimeoutMs != 0 {
+		opts = append(opts, kgo.DialTimeout(time.Duration(conf.DialTimeoutMs)*time.Millisecond))
+	}
 
 	// TODO : allow configuration of these values
 	//kgo.BrokerMaxReadBytes(),
@@ -164,6 +237,9 @@ func (c configurator) ProducerConfig(conf Config) []kgo.Opt {
 		kgo.DefaultProduceTopic(conf.Kafka.DestTopic),
 		kgo.SeedBrokers(conf.Kafka.DestBrokers...),
 	}
+
+	shared := c.SharedKafkaConfig(conf.Kafka.Producer.SharedKafkaConfig, conf.Aws)
+	producerOpts = append(producerOpts, shared...)
 
 	// TODO : figure out how to test this or refactor since the configuration isn't exposed for validation
 	// Setup compression, if configured
@@ -257,9 +333,11 @@ func (c configurator) ConsumerConfig(conf Config) []kgo.Opt {
 		kgo.SeedBrokers(conf.Kafka.SourceBrokers...),
 	}
 
-	if conf.Kafka.Consumer.Topics != "" {
-		topics := strings.Split(conf.Kafka.Consumer.Topics, ",")
-		consumerOpts = append(consumerOpts, kgo.ConsumeTopics(topics...))
+	shared := c.SharedKafkaConfig(conf.Kafka.Consumer.SharedKafkaConfig, conf.Aws)
+	consumerOpts = append(consumerOpts, shared...)
+
+	if len(conf.Kafka.Consumer.Topics) > 0 {
+		consumerOpts = append(consumerOpts, kgo.ConsumeTopics(conf.Kafka.Consumer.Topics...))
 	}
 
 	if conf.Kafka.Consumer.Group != "" {
@@ -286,4 +364,69 @@ func (c configurator) ConsumerConfig(conf Config) []kgo.Opt {
 	}
 
 	return consumerOpts
+}
+
+func getEnvOrDefault[T any](key string, defaultValue T) T {
+	valStr := os.Getenv(key)
+	if valStr == "" {
+		return defaultValue
+	}
+
+	var zero T
+	switch any(zero).(type) {
+	case int:
+		if v, err := strconv.Atoi(valStr); err == nil {
+			return any(v).(T)
+		}
+	case int64:
+		if v, err := strconv.ParseInt(valStr, 10, 64); err == nil {
+			return any(v).(T)
+		}
+	case float64:
+		if v, err := strconv.ParseFloat(valStr, 64); err == nil {
+			return any(v).(T)
+		}
+	case bool:
+		if v, err := strconv.ParseBool(valStr); err == nil {
+			return any(v).(T)
+		}
+	case string:
+		return any(valStr).(T)
+	}
+
+	// fallback: return default if parsing fails or type is unsupported
+	return defaultValue
+}
+
+func getOrErrorOnValueAndCondition(key string, value string, condition bool, err error) (string, error) {
+	v := os.Getenv(key)
+	if condition && v == value {
+		return "", err
+	}
+	return v, nil
+}
+
+func require(key string, err error) (string, error) {
+	k := os.Getenv(key)
+	if k == "" {
+		return "", err
+	}
+	return k, nil
+}
+
+func truthy(key string) bool {
+	var r bool
+	v := os.Getenv(key)
+	if v != "" {
+		r = true
+	}
+	return r
+}
+
+func getList(key string) []string {
+	v := os.Getenv(key)
+	if v == "" {
+		return []string{}
+	}
+	return strings.Split(v, ",")
 }
