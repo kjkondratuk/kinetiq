@@ -211,12 +211,12 @@ func (c configurator) Configure(ctx context.Context) (Config, error) {
 	}
 
 	// configure default AWS configuration for anything that requires it
-	if s3Enabled || producerSaslMechanism == "aws-msk" || consumerSaslMechanism == "aws-msk" {
-		c, err := config.LoadDefaultConfig(ctx)
+	if s3Enabled || producerSaslMechanism == "aws-iam" || consumerSaslMechanism == "aws-iam" {
+		awsCfg, err := config.LoadDefaultConfig(ctx)
 		if err != nil {
 			log.Fatalf("failed to load AWS config: %e", err)
 		}
-		cfg.Aws = &c
+		cfg.Aws = &awsCfg
 	}
 
 	return cfg, nil
@@ -241,7 +241,7 @@ func (c configurator) CreateKafkaClientOptions(conf SharedKafkaConfig, name stri
 			log.Fatalf("%s_SASL_MECHANISM %s requires %s_SASL_TOKEN to be set", name, conf.SASLMechanism, name)
 		}
 
-		if conf.SASLMechanism == "aws-msk" && awsConf == nil {
+		if conf.SASLMechanism == "aws-iam" && awsConf == nil {
 			log.Fatalf("%s_SASL_MECHANISM %s requires a valid AWS config", name, conf.SASLMechanism)
 		}
 	}
@@ -274,7 +274,7 @@ func (c configurator) CreateKafkaClientOptions(conf SharedKafkaConfig, name stri
 			Token:      conf.SASLToken,
 			Extensions: conf.OAuthExtensions,
 		}.AsMechanism()))
-	case "aws-msk":
+	case "aws-iam":
 		opts = append(opts, kgo.SASL(kaws.ManagedStreamingIAM(basicMskMechanism(awsConf))))
 	}
 
