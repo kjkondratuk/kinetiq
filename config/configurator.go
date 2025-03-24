@@ -134,6 +134,7 @@ func (c configurator) ProducerConfig(conf Config) []kgo.Opt {
 		kgo.SeedBrokers(conf.Kafka.DestBrokers...),
 	}
 
+	// TODO : figure out how to test this or refactor since the configuration isn't exposed for validation
 	// Setup compression, if configured
 	if conf.Kafka.Producer.Compression != "" {
 		var comp kgo.CompressionCodec

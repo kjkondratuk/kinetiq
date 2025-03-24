@@ -18,6 +18,7 @@ type pluginLoader interface {
 }
 
 func (l *defaultPluginLoader) load(ctx context.Context, mutex *sync.Mutex, path string) (closeablePlugin, error) {
+	// TODO : introduce a filesystem abstraction so we can more easily unit test this perhaps
 	plugin, err := v1.NewModuleServicePlugin(ctx, v1.WazeroModuleConfig(
 		wazero.NewModuleConfig().
 			WithStartFunctions("_initialize", "_start"). // unclear why adding this made things work... It should be doing this anyway...
