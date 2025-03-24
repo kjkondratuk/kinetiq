@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/kjkondratuk/kinetiq/loader"
 	"testing"
 	"time"
 
@@ -157,4 +158,198 @@ func TestNewS3SqsWatcher_WithInterval(t *testing.T) {
 	typedWatcher, ok := watcher.(*sqsWatcher)
 	assert.True(t, ok)
 	assert.Equal(t, interval, typedWatcher.pollIntervalSeconds)
+}
+
+func TestS3NotificationPluginReloadResponder(t *testing.T) {
+	type constructArgs struct {
+		ctx       context.Context
+		pluginRef string
+		bucket    string
+		dl        func() *loader.MockLoader
+	}
+	type callArgs struct {
+		event *S3EventNotification
+		err   error
+	}
+	tests := []struct {
+		name          string
+		constructArgs constructArgs
+		callArgs      callArgs
+		validate      func(t *testing.T, mockLoader *loader.MockLoader)
+	}{
+		{
+			"should handle errors from listener",
+			constructArgs{
+				ctx:       t.Context(),
+				pluginRef: "test_plugin",
+				bucket:    "some_bucket",
+				dl: func() *loader.MockLoader {
+					return &loader.MockLoader{}
+				},
+			},
+			callArgs{
+				event: nil,
+				err:   errors.New("something went wrong"),
+			},
+			func(t *testing.T, mockLoader *loader.MockLoader) {
+				mockLoader.AssertNotCalled(t, "Get", mock.Anything)
+			},
+		}, {
+			"should handle no records",
+			constructArgs{
+				ctx:       t.Context(),
+				pluginRef: "test_plugin",
+				bucket:    "some_bucket",
+				dl: func() *loader.MockLoader {
+					ldr := &loader.MockLoader{}
+
+					return ldr
+				},
+			},
+			callArgs{
+				event: &S3EventNotification{
+					Records: make([]S3EventRecord, 0),
+				},
+				err: nil,
+			},
+			func(t *testing.T, mockLoader *loader.MockLoader) {
+				mockLoader.AssertNotCalled(t, "Get", mock.Anything)
+			},
+		}, {
+			"should not respond to events for other buckets",
+			constructArgs{
+				ctx:       t.Context(),
+				pluginRef: "test_plugin",
+				bucket:    "some_bucket",
+				dl: func() *loader.MockLoader {
+					ldr := &loader.MockLoader{}
+
+					return ldr
+				},
+			},
+			callArgs{
+				event: &S3EventNotification{
+					Records: []S3EventRecord{
+						{
+							S3: S3Entity{
+								Bucket: S3BucketEntity{
+									Name: "some_other_bucket",
+								},
+							},
+						},
+					},
+				},
+				err: nil,
+			},
+			func(t *testing.T, mockLoader *loader.MockLoader) {
+				mockLoader.AssertNotCalled(t, "Get", mock.Anything)
+			},
+		}, {
+			"should not respond to events for other objects",
+			constructArgs{
+				ctx:       t.Context(),
+				pluginRef: "test_plugin",
+				bucket:    "some_bucket",
+				dl: func() *loader.MockLoader {
+					ldr := &loader.MockLoader{}
+
+					return ldr
+				},
+			},
+			callArgs{
+				event: &S3EventNotification{
+					Records: []S3EventRecord{
+						{
+							S3: S3Entity{
+								Bucket: S3BucketEntity{
+									Name: "some_bucket",
+								},
+								Object: S3ObjectEntity{
+									Key: "some_other_object",
+								},
+							},
+						},
+					},
+				},
+				err: nil,
+			},
+			func(t *testing.T, mockLoader *loader.MockLoader) {
+				mockLoader.AssertNotCalled(t, "Get", mock.Anything)
+			},
+		}, {
+			"should handle errors to reload the module",
+			constructArgs{
+				ctx:       t.Context(),
+				pluginRef: "test_plugin",
+				bucket:    "some_bucket",
+				dl: func() *loader.MockLoader {
+					ldr := &loader.MockLoader{}
+					ldr.On("Reload", mock.Anything).Return(errors.New("something bad happened"))
+					return ldr
+				},
+			},
+			callArgs{
+				event: &S3EventNotification{
+					Records: []S3EventRecord{
+						{
+							EventName: "ObjectCreated:Put",
+							S3: S3Entity{
+								Bucket: S3BucketEntity{
+									Name: "some_bucket",
+								},
+								Object: S3ObjectEntity{
+									Key: "test_plugin",
+								},
+							},
+						},
+					},
+				},
+				err: nil,
+			},
+			func(t *testing.T, mockLoader *loader.MockLoader) {
+				mockLoader.AssertCalled(t, "Reload", mock.Anything)
+			},
+		}, {
+			"should handle successful calls to reload the module",
+			constructArgs{
+				ctx:       t.Context(),
+				pluginRef: "test_plugin",
+				bucket:    "some_bucket",
+				dl: func() *loader.MockLoader {
+					ldr := &loader.MockLoader{}
+					ldr.On("Reload", mock.Anything).Return(nil)
+					return ldr
+				},
+			},
+			callArgs{
+				event: &S3EventNotification{
+					Records: []S3EventRecord{
+						{
+							EventName: "ObjectCreated:Put",
+							S3: S3Entity{
+								Bucket: S3BucketEntity{
+									Name: "some_bucket",
+								},
+								Object: S3ObjectEntity{
+									Key: "test_plugin",
+								},
+							},
+						},
+					},
+				},
+				err: nil,
+			},
+			func(t *testing.T, mockLoader *loader.MockLoader) {
+				mockLoader.AssertCalled(t, "Reload", mock.Anything)
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ldr := tt.constructArgs.dl()
+			responder := S3NotificationPluginReloadResponder(tt.constructArgs.ctx, tt.constructArgs.pluginRef, tt.constructArgs.bucket, ldr)
+			responder(tt.callArgs.event, tt.callArgs.err)
+			tt.validate(t, ldr)
+		})
+	}
 }

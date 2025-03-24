@@ -1,7 +1,10 @@
 package detection
 
 import (
+	"context"
 	"errors"
+	"github.com/fsnotify/fsnotify"
+	"github.com/kjkondratuk/kinetiq/loader"
 	"testing"
 	"time"
 
@@ -79,6 +82,128 @@ func Test_listener_Listen(t *testing.T) {
 			time.Sleep(100 * time.Millisecond) // Ensure all goroutines execute
 
 			mockResponder.AssertExpectations(t)
+		})
+	}
+}
+
+func TestFilesystemNotificationPluginReloadResponder(t *testing.T) {
+	type constructArgs struct {
+		ctx context.Context
+		dl  func() *loader.MockLoader
+	}
+	type callArgs struct {
+		event *fsnotify.Event
+		err   error
+	}
+	tests := []struct {
+		name          string
+		constructArgs constructArgs
+		callArgs      callArgs
+		validate      func(t *testing.T, mockLoader *loader.MockLoader)
+	}{
+		{
+			"should handle error from event source",
+			constructArgs{
+				ctx: t.Context(),
+				dl: func() *loader.MockLoader {
+					ldr := &loader.MockLoader{}
+					return ldr
+				},
+			},
+			callArgs{
+				event: nil,
+				err:   errors.New("something went wrong"),
+			},
+			func(t *testing.T, mockLoader *loader.MockLoader) {
+				mockLoader.AssertNotCalled(t, "Get", mock.Anything)
+			},
+		}, {
+			"should handle non-write non-create events",
+			constructArgs{
+				ctx: t.Context(),
+				dl: func() *loader.MockLoader {
+					ldr := &loader.MockLoader{}
+					return ldr
+				},
+			},
+			callArgs{
+				event: &fsnotify.Event{
+					Name: "some_file",
+					Op:   fsnotify.Remove,
+				},
+				err: nil,
+			},
+			func(t *testing.T, mockLoader *loader.MockLoader) {
+				mockLoader.AssertNotCalled(t, "Get", mock.Anything)
+			},
+		}, {
+			"should handle errors reloading gracefully",
+			constructArgs{
+				ctx: t.Context(),
+				dl: func() *loader.MockLoader {
+					ldr := &loader.MockLoader{}
+					ldr.On("Reload", mock.Anything).Return(errors.New("something bad happened"))
+					return ldr
+				},
+			},
+			callArgs{
+				event: &fsnotify.Event{
+					Name: "some_file",
+					Op:   fsnotify.Create,
+				},
+				err: nil,
+			},
+			func(t *testing.T, mockLoader *loader.MockLoader) {
+				mockLoader.AssertCalled(t, "Reload", mock.Anything)
+			},
+		}, {
+			"should handle successful reloading for create events",
+			constructArgs{
+				ctx: t.Context(),
+				dl: func() *loader.MockLoader {
+					ldr := &loader.MockLoader{}
+					ldr.On("Reload", mock.Anything).Return(nil)
+					return ldr
+				},
+			},
+			callArgs{
+				event: &fsnotify.Event{
+					Name: "some_file",
+					Op:   fsnotify.Create,
+				},
+				err: nil,
+			},
+			func(t *testing.T, mockLoader *loader.MockLoader) {
+				mockLoader.AssertCalled(t, "Reload", mock.Anything)
+			},
+		}, {
+			"should handle successful reloading for write events",
+			constructArgs{
+				ctx: t.Context(),
+				dl: func() *loader.MockLoader {
+					ldr := &loader.MockLoader{}
+					ldr.On("Reload", mock.Anything).Return(nil)
+					return ldr
+				},
+			},
+			callArgs{
+				event: &fsnotify.Event{
+					Name: "some_file",
+					Op:   fsnotify.Write,
+				},
+				err: nil,
+			},
+			func(t *testing.T, mockLoader *loader.MockLoader) {
+				mockLoader.AssertCalled(t, "Reload", mock.Anything)
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ldr := tt.constructArgs.dl()
+			responder := FilesystemNotificationPluginReloadResponder(tt.constructArgs.ctx, ldr)
+			responder(tt.callArgs.event, tt.callArgs.err)
+			tt.validate(t, ldr)
 		})
 	}
 }
