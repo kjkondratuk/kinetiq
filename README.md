@@ -22,11 +22,11 @@ The original concept for Kinetiq was to leverage a combination of a few technolo
 * WebAssembly - a performant and portable execution binary format with good language support
 * Protobuf - a compact, and type-safe serialization format that supports declarative API contracts across a wide variety of languages
 
-The initial use-case was being able to read a kafka topic (specifically on AWS MSK), perform some operation on
-the data defined by a web assembly module, and write the result to an output topic.  Further, the web assembly module
-artifact could be monitored for changes via filesystem notifications or cloud provider change events and dynamically
-reloaded when necessary to facilitate a fast deployment simply by recompiling locally or publishing a new version of the WASM
-module to your cloud provider.
+The initial use-case was being able to read a kafka topic, perform some operation on the data defined by a web assembly
+module, and write the result to an output topic.  Further, the web assembly module artifact could be monitored for
+changes via filesystem notifications or cloud provider change events and dynamically reloaded when necessary to
+facilitate a fast deployment simply by recompiling locally or publishing a new version of the WASM module to your cloud
+provider.
 
 Evaluating that simple use-case, it's easy to see how this same concept and its benefits could apply more widely to
 different sources/sinks, data formats, and messaging providers.
@@ -59,7 +59,9 @@ The plugin schema and compiled SDKs are available at [buf.build (BSR)](https://b
 
 # Docker Images
 
-Docker images are available from [Docker Hub](https://hub.docker.com/r/paintface07/kinetiq/tags).
+Docker images are available from [Docker Hub](https://hub.docker.com/r/paintface07/kinetiq/tags) and are available in:
+* Alpine - `linux/amd64`
+* Alpine - `linux/arm64`
 
 # Documentation
 
