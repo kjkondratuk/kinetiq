@@ -39,12 +39,8 @@ This project is very much a work-in-progress currently, but you can track the pr
 
 1. Message processing will be briefly delayed during module reloading to avoid data loss
 2. Only works currently with Kafka inputs and outputs
-3. Only supports PLAINTEXT communication for Kafka at the moment
-4. Doesn't support consumer groups yet, so it processes the whole topic on start
-5. Requires web assembly modules to be loadable by [wazero](https://wazero.io/) runtime
-6. Only supports module change detection for S3 and local files currently
-7. No deployable docker image published to Docker Hub yet
-8. Schema and compiled SDKs are not published automatically
+3. Requires web assembly modules to be loadable by [wazero](https://wazero.io/) runtime
+4. Only supports module change detection for S3 and local files currently
 
 Please check out [issues](https://github.com/kjkondratuk/kinetiq/issues) to see what we're working on!
 
@@ -60,6 +56,10 @@ to communicate data between the host and plugin.  Tools supporting this interact
 ## Schema
 
 The plugin schema and compiled SDKs are available at [buf.build (BSR)](https://buf.build/kjkondratuk/kinetiq)!
+
+# Docker Images
+
+Docker images are available from [Docker Hub](https://hub.docker.com/r/paintface07/kinetiq/tags).
 
 # Documentation
 
