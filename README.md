@@ -60,3 +60,7 @@ to communicate data between the host and plugin.  Tools supporting this interact
 ## Schema
 
 The plugin schema and compiled SDKs are available at [buf.build (BSR)](https://buf.build/kjkondratuk/kinetiq)!
+
+# Documentation
+
+Further documentation on using kinetiq is available in [the wiki](https://github.com/kjkondratuk/kinetiq/wiki)
