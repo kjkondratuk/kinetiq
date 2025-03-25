@@ -136,6 +136,7 @@ func (c configurator) Configure(ctx context.Context) (Config, error) {
 
 	// setup producer
 	producerCompression := os.Getenv("KAFKA_PRODUCER_COMPRESSION")
+	producerPartitioner := os.Getenv("KAFKA_PRODUCER_PARTITIONER")
 	producerDialTimeoutMs := getEnvOrDefault("KAFKA_PRODUCER_DIAL_TIMEOUT_MS", 0)
 	producerTlsEnabled := truthy("KAFKA_PRODUCER_TLS_ENABLED")
 	producerBatchMaxBytes := getEnvOrDefault("KAFKA_PRODUCER_BATCH_MAX_BYTES", 0)
@@ -182,6 +183,7 @@ func (c configurator) Configure(ctx context.Context) (Config, error) {
 					DialTimeoutMs:   producerDialTimeoutMs,
 					TLSEnabled:      producerTlsEnabled,
 				},
+				Partitioner:        producerPartitioner,
 				Compression:        producerCompression,
 				BatchMaxBytes:      producerBatchMaxBytes,
 				MaxBufferedRecords: producerMaxBufferedRecords,
@@ -344,6 +346,8 @@ func (c configurator) ProducerConfig(conf Config) []kgo.Opt {
 			part = kgo.ManualPartitioner()
 		case "sticky":
 			part = kgo.StickyPartitioner()
+		case "sticky-key":
+			part = kgo.StickyKeyPartitioner(nil)
 		case "least-backup":
 			part = kgo.LeastBackupPartitioner()
 		default:
