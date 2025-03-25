@@ -46,7 +46,9 @@ func (m MyPlugin) Process(ctx context.Context, request *v1.ProcessRequest) (*v1.
 	// Execute an HTTP get request using the provided host function.  This allows the WASM module to invoke logic on the
 	// host and is necessary because the WASM environment cannot run parallel tasks required for things like web clients
 	// and servers.  In this case, we perform a simple, unparameterized get request against a RESTful service.
-	r, _ := m.HttpGet(ctx, &v1.HttpGetRequest{Url: "https://stage-brand-service.fetchrewards.com/v2/brands/by-user/679d402a4572edcb3fb66882"})
+	//
+	// **Note** : this url will not actually work and is provided only as an example
+	r, _ := m.HttpGet(ctx, &v1.HttpGetRequest{Url: "https://some.url.com/brands"})
 	// TODO : need a configuration API to provide/seed values like this, or some ability to load a config file
 
 	// Unmarshal data out of the HTTP response
