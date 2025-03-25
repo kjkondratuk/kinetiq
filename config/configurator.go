@@ -136,6 +136,7 @@ func (c configurator) Configure(ctx context.Context) (Config, error) {
 
 	// setup producer
 	producerCompression := os.Getenv("KAFKA_PRODUCER_COMPRESSION")
+	producerPartitioner := os.Getenv("KAFKA_PRODUCER_PARTITIONER")
 	producerDialTimeoutMs := getEnvOrDefault("KAFKA_PRODUCER_DIAL_TIMEOUT_MS", 0)
 	producerTlsEnabled := truthy("KAFKA_PRODUCER_TLS_ENABLED")
 	producerBatchMaxBytes := getEnvOrDefault("KAFKA_PRODUCER_BATCH_MAX_BYTES", 0)
@@ -182,6 +183,7 @@ func (c configurator) Configure(ctx context.Context) (Config, error) {
 					DialTimeoutMs:   producerDialTimeoutMs,
 					TLSEnabled:      producerTlsEnabled,
 				},
+				Partitioner:        producerPartitioner,
 				Compression:        producerCompression,
 				BatchMaxBytes:      producerBatchMaxBytes,
 				MaxBufferedRecords: producerMaxBufferedRecords,
@@ -344,6 +346,8 @@ func (c configurator) ProducerConfig(conf Config) []kgo.Opt {
 			part = kgo.ManualPartitioner()
 		case "sticky":
 			part = kgo.StickyPartitioner()
+		case "sticky-key":
+			part = kgo.StickyKeyPartitioner(nil)
 		case "least-backup":
 			part = kgo.LeastBackupPartitioner()
 		default:
@@ -400,7 +404,6 @@ func (c configurator) ProducerConfig(conf Config) []kgo.Opt {
 
 func (c configurator) ConsumerConfig(conf Config) []kgo.Opt {
 	consumerOpts := []kgo.Opt{
-		kgo.ConsumeTopics(conf.Kafka.SourceTopic),
 		kgo.SeedBrokers(conf.Kafka.SourceBrokers...),
 	}
 
@@ -408,7 +411,10 @@ func (c configurator) ConsumerConfig(conf Config) []kgo.Opt {
 	consumerOpts = append(consumerOpts, shared...)
 
 	if len(conf.Kafka.Consumer.Topics) > 0 {
-		consumerOpts = append(consumerOpts, kgo.ConsumeTopics(conf.Kafka.Consumer.Topics...))
+		topics := append(conf.Kafka.Consumer.Topics, conf.Kafka.SourceTopic)
+		consumerOpts = append(consumerOpts, kgo.ConsumeTopics(topics...))
+	} else {
+		consumerOpts = append(consumerOpts, kgo.ConsumeTopics(conf.Kafka.SourceTopic))
 	}
 
 	if conf.Kafka.Consumer.Group != "" {
