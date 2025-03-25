@@ -404,7 +404,6 @@ func (c configurator) ProducerConfig(conf Config) []kgo.Opt {
 
 func (c configurator) ConsumerConfig(conf Config) []kgo.Opt {
 	consumerOpts := []kgo.Opt{
-		kgo.ConsumeTopics(conf.Kafka.SourceTopic),
 		kgo.SeedBrokers(conf.Kafka.SourceBrokers...),
 	}
 
@@ -412,7 +411,10 @@ func (c configurator) ConsumerConfig(conf Config) []kgo.Opt {
 	consumerOpts = append(consumerOpts, shared...)
 
 	if len(conf.Kafka.Consumer.Topics) > 0 {
-		consumerOpts = append(consumerOpts, kgo.ConsumeTopics(conf.Kafka.Consumer.Topics...))
+		topics := append(conf.Kafka.Consumer.Topics, conf.Kafka.SourceTopic)
+		consumerOpts = append(consumerOpts, kgo.ConsumeTopics(topics...))
+	} else {
+		consumerOpts = append(consumerOpts, kgo.ConsumeTopics(conf.Kafka.SourceTopic))
 	}
 
 	if conf.Kafka.Consumer.Group != "" {
