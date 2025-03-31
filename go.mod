@@ -1,12 +1,13 @@
 module github.com/kjkondratuk/kinetiq
 
 go 1.24.1
+toolchain go1.24.1
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.36.3
 	github.com/aws/aws-sdk-go-v2/config v1.29.10
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.78.2
-	github.com/aws/aws-sdk-go-v2/service/sqs v1.38.1
+	github.com/aws/aws-sdk-go-v2/service/sqs v1.38.3
 	github.com/fsnotify/fsnotify v1.8.0
 	github.com/go-chi/chi/v5 v5.2.1
 	github.com/knqyf263/go-plugin v0.9.0
