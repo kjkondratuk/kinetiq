@@ -11,7 +11,6 @@ BUCKET=kinetiq-test-bucket
 DOCKER=docker
 KAFKA_TOPICS=kafka-topics
 
-
 gen-proto:
 	-rm -rf gen
 	$(BUF) generate
