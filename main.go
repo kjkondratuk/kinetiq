@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/fsnotify/fsnotify"
@@ -10,17 +11,35 @@ import (
 	app_config "github.com/kjkondratuk/kinetiq/config"
 	"github.com/kjkondratuk/kinetiq/detection"
 	"github.com/kjkondratuk/kinetiq/loader"
+	"github.com/kjkondratuk/kinetiq/otel"
 	"github.com/kjkondratuk/kinetiq/processor"
 	sink_kafka "github.com/kjkondratuk/kinetiq/sink/kafka"
 	source_kafka "github.com/kjkondratuk/kinetiq/source/kafka"
 	"github.com/twmb/franz-go/pkg/kgo"
 	"log"
+	"net"
 	"net/http"
+	"os"
+	"os/signal"
 	"strings"
 )
 
 func main() {
 	ctx := context.Background()
+
+	// Handle SIGINT gracefully.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
+	// Set up OpenTelemetry.
+	otelShutdown, err := otel.NewOtelSdk().Configure(ctx)
+	if err != nil {
+		return
+	}
+	// Handle shutdown properly so nothing leaks.
+	defer func() {
+		err = errors.Join(err, otelShutdown(ctx))
+	}()
 
 	appCfg, err := app_config.DefaultConfigurator.Configure(ctx)
 	if err != nil {
@@ -134,20 +153,35 @@ func main() {
 
 	r := chi.NewRouter()
 
-	// Middleware
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 
-	// Routes
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
 	})
 
-	// Start Server
-	log.Println("Starting server on :8080")
-	err = http.ListenAndServe(":8080", r)
-	if err != nil {
-		log.Fatal("Server error", err)
+	srv := &http.Server{
+		Addr:        ":8080",
+		BaseContext: func(_ net.Listener) context.Context { return ctx },
+		// TODO : make server timeouts configurable
+		//ReadTimeout:  time.Second,
+		//WriteTimeout: 10 * time.Second,
+		Handler: r,
 	}
+	srvErr := make(chan error, 1)
+	go func() {
+		srvErr <- srv.ListenAndServe()
+	}()
+
+	// Wait for interruption.
+	select {
+	case err = <-srvErr:
+		return
+	case <-ctx.Done():
+		stop()
+	}
+
+	err = srv.Shutdown(context.Background())
+	return
 }
