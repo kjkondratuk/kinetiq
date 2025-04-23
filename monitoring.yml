@@ -1,0 +1,53 @@
+# Hey there! This is a Monitoring Manifest that is used by SRE's Observability as a Service system to:
+# - Add custom rows & panels to your service dashboard (that is provisioned seamlessly by OaaSis).
+# - Create or update Grafana Alerts for your service, defining who should be tagged on Slack or Paged through PagerDuty.
+
+# Full documentation here: https://fetchrewards.atlassian.net/wiki/spaces/SITERELIABILITY/pages/4174676016/Configuring+Service+Monitoring+Manifests
+
+# If you are looking for more examples of custom panels, check out our catalog in:
+# http://oaasis-catalog-panels.fetchrewards.com
+
+### SAMPLE MANIFEST STARTS HERE ####
+
+# metrics:
+#  - name: 'Custom Row with additional traffic panels (OTel/Prometheus)'
+#    panels:
+#      - name: response_code per route (prometheus)
+#        visualization: timeseries
+#        height: 300
+#        width: 4
+#        queries:
+#        - datasource: prometheus
+#          query: sum(rate(http_server_request_duration_count{service_name="${service}",deployment_environment="${environment}",cloud_region="${region}"}[5m])) by (http_status_code,http_route)
+
+#alerts:
+#  template:
+#    - type: success-rate-prometheus
+#      threshold: 75
+#      page: <contact_point_for_your_pack>
+#      priority: low
+#
+#  custom:
+#    - name: 'p99 latency alarm'
+#      queries:
+#        - expression: 'aggregates.fetch.$service.$environment.$region.overall_response_time:99pct'
+#          # our FHG (Fetch Hosted Graphite) aggregates your service's `response_time` metric producing this `aggregates.fetch.*` metric.
+#          type: 'graphite'
+#          time-from: 'now-2m'
+#          time-to: 'now'
+#          ref-name: 'p99'
+
+ #         threshold: 400
+ #         aggregation: 'last'
+ #         operator: '>='
+ #     labels:
+ #       slack: 'sre-bots'
+ #       priority: 'low'
+ #     evaluation:
+ #       interval: '1m'
+ #       pending: '5m'
+ #     annotations:
+ #       description: 'test description'
+ #       summary: 'The app is producing responses with high latency. Check recent telemetry around dependencies, traffic surges, datastores, recent deployments, etc.'
+ #       runbook-url: 'https://fetchrewards.atlassian.net/wiki/spaces/SITERELIABILITY/pages/3746857022/oaasis-mirage-provisioner'
+ #     enable-subprod-alarms: true

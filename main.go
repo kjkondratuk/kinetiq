@@ -31,8 +31,13 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
+	dp, err := otel.NewDefaultOtelProvider(ctx)
+	if err != nil {
+		log.Fatalf("Failed to create default otel provider: %s", err)
+	}
+
 	// Set up OpenTelemetry.
-	otelShutdown, err := otel.NewOtelSdk().Configure(ctx)
+	otelShutdown, err := otel.NewOtelSdk(dp).Configure()
 	if err != nil {
 		return
 	}

@@ -1,0 +1,14 @@
+FROM golang:1.24.1-alpine AS builder
+
+WORKDIR /app
+
+COPY . .
+
+RUN go build -o test_producer cmd/test_producer/main.go
+
+FROM alpine:3
+
+WORKDIR /root/
+COPY --from=builder /app/test_producer .
+
+CMD ["./test_producer"]

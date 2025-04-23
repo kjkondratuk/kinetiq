@@ -2,6 +2,9 @@ services:
     zookeeper:
         container_name: zookeeper
         image: confluentinc/cp-zookeeper:7.4.3
+        profiles:
+            - minimal
+            - all
         environment:
             ZOOKEEPER_CLIENT_PORT: 2181
             ZOOKEEPER_TICK_TIME: 2000
@@ -12,6 +15,9 @@ services:
             - "49092:49092"
         depends_on:
             - zookeeper
+        profiles:
+            - minimal
+            - all
         environment:
             KAFKA_BROKER_ID: 1
             KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
@@ -26,6 +32,8 @@ services:
             - "10015:8080"
         depends_on:
             - kafka
+        profiles:
+            - all
         environment:
             KAFKA_CLUSTERS_0_NAME: local
             KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
@@ -36,12 +44,120 @@ services:
             context: .
         ports:
             - "8080:8080"
+        profiles:
+            - minimal
+            - all
         environment:
             KAFKA_SOURCE_TOPIC: kinetiq-test-topic
             KAFKA_DEST_TOPIC: kinetiq-test-topic-out
             KAFKA_SOURCE_BROKERS: kafka:9092
             PLUGIN_REF: ./examples/test_module/test_module.wasm
         volumes:
-            - ./examples/test_module_complex/test_module.wasm:/root/examples/test_module/test_module.wasm:ro
+            - ./examples/test_module/test_module.wasm:/root/examples/test_module/test_module.wasm:ro
+        depends_on:
+            - kafka-topic-creator
+    prometheus:
+        container_name: prometheus
+        image: prom/prometheus:latest
+        profiles:
+            - otel
+            - all
+        volumes:
+            - ./local-prometheus.yml:/etc/prometheus/prometheus.yml
+            - prometheus_data:/prometheus
+    grafana:
+        container_name: grafana
+        image: grafana/grafana:latest
+        ports:
+            - "41000:3000"
+        profiles:
+            - otel
+            - all
+        environment:
+            - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
+            - GF_AUTH_ANONYMOUS_ENABLED=true
+            - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+            - GF_SECURITY_ALLOW_EMBEDDING=true
+        volumes:
+            - grafana_data:/var/lib/grafana
+            - grafana_logs:/var/log/grafana
+            - ./grafana/provisioning:/etc/grafana/provisioning
+    otel-collector:
+        container_name: otel-collector
+        image: otel/opentelemetry-collector-contrib:latest
+        ports:
+            - "4317:4317"
+            - "1888:1888"
+            - "8888:8888"
+            - "8889:8889"
+            - "13133:13133"
+            - "55679:55679"
+        profiles:
+            - otel
+            - all
+        command:
+            - --config=/etc/otelcol-contrib/config.yaml
+        volumes:
+            - ./otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml
+
+    jaeger:
+        container_name: jaeger
+        image: jaegertracing/all-in-one:latest
+        ports:
+            - "16686:16686"  # UI
+            - "14250:14250"  # gRPC collector
+            - "14317:4317"    # OTLP gRPC
+            - "4318:4318"    # OTLP HTTP
+        profiles:
+            - otel
+            - all
+        environment:
+            - COLLECTOR_OTLP_ENABLED=true
+
+    loki:
+        container_name: loki
+        image: grafana/loki:latest
+        ports:
+            - "3100:3100"
+        profiles:
+            - otel
+            - all
+        command: -config.file=/etc/loki/local-config.yaml
+        volumes:
+            - loki_data:/loki
+
+    kafka-topic-creator:
+        container_name: kafka-topic-creator
+        image: confluentinc/cp-kafka:7.4.3
         depends_on:
             - kafka
+        profiles:
+            - minimal
+            - all
+        command: >
+            bash -c "
+                echo 'Waiting for Kafka to be ready...' &&
+                cub kafka-ready -b kafka:9092 1 120 &&
+                echo 'Creating topics...' &&
+                kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --partitions 1 --replication-factor 1 --topic kinetiq-test-topic &&
+                kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --partitions 1 --replication-factor 1 --topic kinetiq-test-topic-out &&
+                echo 'Topics created successfully'"
+
+    test-producer:
+        container_name: test-producer
+        build:
+            dockerfile: Dockerfile.test_producer
+            context: .
+        profiles:
+            - minimal
+            - all
+        environment:
+            KAFKA_BROKERS: kafka:9092
+        depends_on:
+            - kafka-topic-creator
+
+volumes:
+    grafana_data:
+    grafana_logs:
+    prometheus_data:
+    loki_data:

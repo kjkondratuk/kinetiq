@@ -41,7 +41,7 @@ func (p *wasmProcessor) Start(ctx context.Context) {
 			process, err := p.process(ctx, input)
 			//p.lock.Unlock()
 			if err != nil {
-				log.Println("error processing record: %w", err)
+				log.Printf("error processing record: %s\n", err)
 				continue
 			}
 			p.output <- process
