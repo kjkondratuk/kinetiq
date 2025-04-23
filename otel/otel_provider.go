@@ -9,7 +9,52 @@ import (
 	"go.opentelemetry.io/otel/sdk/log"
 	"go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/trace"
+	"os"
+	"strconv"
+	"time"
 )
+
+// getOtlpEndpoint returns the OTLP endpoint from environment variables
+// It checks for signal-specific endpoint first, then falls back to the general endpoint
+// If no environment variable is set, it returns the default endpoint
+func getOtlpEndpoint(signal string) string {
+	// Check for signal-specific endpoint
+	if endpoint := os.Getenv("OTEL_EXPORTER_OTLP_" + signal + "_ENDPOINT"); endpoint != "" {
+		return endpoint
+	}
+
+	// Check for general endpoint
+	if endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"); endpoint != "" {
+		return endpoint
+	}
+
+	// Default endpoint
+	return "localhost:4317"
+}
+
+// isOtlpInsecure returns whether to use an insecure connection from environment variables
+// It checks for signal-specific setting first, then falls back to the general setting
+// If no environment variable is set, it returns the default (true)
+func isOtlpInsecure(signal string) bool {
+	// Check for signal-specific setting
+	if insecureStr := os.Getenv("OTEL_EXPORTER_OTLP_" + signal + "_INSECURE"); insecureStr != "" {
+		insecure, err := strconv.ParseBool(insecureStr)
+		if err == nil {
+			return insecure
+		}
+	}
+
+	// Check for general setting
+	if insecureStr := os.Getenv("OTEL_EXPORTER_OTLP_INSECURE"); insecureStr != "" {
+		insecure, err := strconv.ParseBool(insecureStr)
+		if err == nil {
+			return insecure
+		}
+	}
+
+	// Default to insecure
+	return true
+}
 
 type otelProvider struct {
 	tracerProvider *trace.TracerProvider
@@ -74,7 +119,18 @@ func (op *otelProvider) newDefaultPropagator() propagation.TextMapPropagator {
 }
 
 func (op *otelProvider) newDefaultTracerProvider(ctx context.Context) (*trace.TracerProvider, error) {
-	traceExporter, err := otlptracegrpc.New(ctx)
+	endpoint := getOtlpEndpoint("TRACES")
+	insecure := isOtlpInsecure("TRACES")
+
+	opts := []otlptracegrpc.Option{
+		otlptracegrpc.WithEndpoint(endpoint),
+	}
+
+	if insecure {
+		opts = append(opts, otlptracegrpc.WithInsecure())
+	}
+
+	traceExporter, err := otlptracegrpc.New(ctx, opts...)
 	//stdouttrace.WithPrettyPrint())
 	if err != nil {
 		return nil, err
@@ -88,20 +144,46 @@ func (op *otelProvider) newDefaultTracerProvider(ctx context.Context) (*trace.Tr
 
 func (op *otelProvider) newDefaultMeterProvider(ctx context.Context) (*metric.MeterProvider, error) {
 	//metricExporter, err := stdoutmetric.New()
-	metricExporter, err := otlpmetricgrpc.New(ctx)
+	endpoint := getOtlpEndpoint("METRICS")
+	insecure := isOtlpInsecure("METRICS")
+
+	opts := []otlpmetricgrpc.Option{
+		otlpmetricgrpc.WithEndpoint(endpoint),
+	}
+
+	if insecure {
+		opts = append(opts, otlpmetricgrpc.WithInsecure())
+	}
+
+	metricExporter, err := otlpmetricgrpc.New(ctx, opts...)
 	if err != nil {
 		return nil, err
 	}
 
 	meterProvider := metric.NewMeterProvider(
-		metric.WithReader(metric.NewPeriodicReader(metricExporter)),
+		metric.WithReader(metric.NewPeriodicReader(
+			metricExporter,
+			// Set a shorter interval for more frequent metric exports
+			metric.WithInterval(15*time.Second),
+		)),
 	)
 	return meterProvider, nil
 }
 
 func (op *otelProvider) newDefaultLoggerProvider(ctx context.Context) (*log.LoggerProvider, error) {
 	//logExporter, err := stdoutlog.New()
-	logExporter, err := otlploggrpc.New(ctx)
+	endpoint := getOtlpEndpoint("LOGS")
+	insecure := isOtlpInsecure("LOGS")
+
+	opts := []otlploggrpc.Option{
+		otlploggrpc.WithEndpoint(endpoint),
+	}
+
+	if insecure {
+		opts = append(opts, otlploggrpc.WithInsecure())
+	}
+
+	logExporter, err := otlploggrpc.New(ctx, opts...)
 	if err != nil {
 		return nil, err
 	}

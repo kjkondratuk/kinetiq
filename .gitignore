@@ -30,3 +30,4 @@ old
 *.wasm
 .DS_Store
 .terraform
+*.swp

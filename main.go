@@ -7,10 +7,11 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/fsnotify/fsnotify"
 	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
+	chi_middleware "github.com/go-chi/chi/v5/middleware"
 	app_config "github.com/kjkondratuk/kinetiq/config"
 	"github.com/kjkondratuk/kinetiq/detection"
 	"github.com/kjkondratuk/kinetiq/loader"
+	"github.com/kjkondratuk/kinetiq/middleware"
 	"github.com/kjkondratuk/kinetiq/otel"
 	"github.com/kjkondratuk/kinetiq/processor"
 	sink_kafka "github.com/kjkondratuk/kinetiq/sink/kafka"
@@ -76,12 +77,20 @@ func main() {
 
 	log.Print("Reader client configured...")
 
-	reader := source_kafka.NewKafkaReader(readerClient)
+	// Create Kafka reader with instrumentation
+	reader, err := source_kafka.NewKafkaReader(readerClient)
+	if err != nil {
+		log.Fatal("Failed to create kafka reader", err)
+	}
 	defer reader.Close()
 
 	log.Print("Reader configured...")
 
-	proc := processor.NewWasmProcessor(dl, reader.Output())
+	// Create WASM processor with instrumentation
+	proc, err := processor.NewWasmProcessor(dl, reader.Output())
+	if err != nil {
+		log.Fatal("Failed to create wasm processor", err)
+	}
 	defer proc.Close()
 
 	log.Print("Processor configured...")
@@ -100,7 +109,11 @@ func main() {
 
 	log.Print("Writer client configured...")
 
-	writer := sink_kafka.NewKafkaWriter(writerClient, proc.Output())
+	// Create Kafka writer with instrumentation
+	writer, err := sink_kafka.NewKafkaWriter(writerClient, proc.Output())
+	if err != nil {
+		log.Fatal("Failed to create kafka writer", err)
+	}
 	defer writer.Close()
 
 	log.Print("Writer configured...")
@@ -158,8 +171,12 @@ func main() {
 
 	r := chi.NewRouter()
 
-	r.Use(middleware.Logger)
-	r.Use(middleware.Recoverer)
+	r.Use(chi_middleware.Logger)
+	r.Use(chi_middleware.Recoverer)
+
+	// Add OpenTelemetry middleware
+	httpInstr := otel.NewInstrumentation("http_server")
+	r.Use(middleware.OtelMiddleware(httpInstr))
 
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

@@ -4,7 +4,9 @@ services:
         image: confluentinc/cp-zookeeper:7.4.3
         profiles:
             - minimal
+            - otel
             - all
+            - debug
         environment:
             ZOOKEEPER_CLIENT_PORT: 2181
             ZOOKEEPER_TICK_TIME: 2000
@@ -17,7 +19,9 @@ services:
             - zookeeper
         profiles:
             - minimal
+            - otel
             - all
+            - debug
         environment:
             KAFKA_BROKER_ID: 1
             KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
@@ -34,6 +38,7 @@ services:
             - kafka
         profiles:
             - all
+            - debug
         environment:
             KAFKA_CLUSTERS_0_NAME: local
             KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
@@ -44,14 +49,17 @@ services:
             context: .
         ports:
             - "8080:8080"
-        profiles:
+        profiles:x
             - minimal
+            - otel
             - all
         environment:
             KAFKA_SOURCE_TOPIC: kinetiq-test-topic
             KAFKA_DEST_TOPIC: kinetiq-test-topic-out
             KAFKA_SOURCE_BROKERS: kafka:9092
             PLUGIN_REF: ./examples/test_module/test_module.wasm
+            OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector:4317
+            OTEL_EXPORTER_OTLP_INSECURE: "true"
         volumes:
             - ./examples/test_module/test_module.wasm:/root/examples/test_module/test_module.wasm:ro
         depends_on:
@@ -59,9 +67,12 @@ services:
     prometheus:
         container_name: prometheus
         image: prom/prometheus:latest
+        ports:
+            - "9090:9090"
         profiles:
             - otel
             - all
+            - debug
         volumes:
             - ./local-prometheus.yml:/etc/prometheus/prometheus.yml
             - prometheus_data:/prometheus
@@ -73,8 +84,8 @@ services:
         profiles:
             - otel
             - all
+            - debug
         environment:
-            - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
             - GF_AUTH_ANONYMOUS_ENABLED=true
             - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
             - GF_SECURITY_ALLOW_EMBEDDING=true
@@ -95,6 +106,7 @@ services:
         profiles:
             - otel
             - all
+            - debug
         command:
             - --config=/etc/otelcol-contrib/config.yaml
         volumes:
@@ -111,6 +123,7 @@ services:
         profiles:
             - otel
             - all
+            - debug
         environment:
             - COLLECTOR_OTLP_ENABLED=true
 
@@ -122,6 +135,7 @@ services:
         profiles:
             - otel
             - all
+            - debug
         command: -config.file=/etc/loki/local-config.yaml
         volumes:
             - loki_data:/loki
@@ -133,7 +147,9 @@ services:
             - kafka
         profiles:
             - minimal
+            - otel
             - all
+            - debug
         command: >
             bash -c "
                 echo 'Waiting for Kafka to be ready...' &&
@@ -150,7 +166,9 @@ services:
             context: .
         profiles:
             - minimal
+            - otel
             - all
+            - debug
         environment:
             KAFKA_BROKERS: kafka:9092
         depends_on:
