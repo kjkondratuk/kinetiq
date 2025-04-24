@@ -16,6 +16,22 @@ import (
 	"time"
 )
 
+// isOtelEnabled returns whether OpenTelemetry is enabled from environment variables
+// It uses the standard OpenTelemetry environment variable OTEL_SDK_DISABLED
+// If OTEL_SDK_DISABLED is "true", OpenTelemetry is disabled
+// If no environment variable is set, it returns the default (false)
+func isOtelEnabled() bool {
+	if disabledStr := os.Getenv("OTEL_SDK_DISABLED"); disabledStr != "" {
+		disabled, err := strconv.ParseBool(disabledStr)
+		if err == nil {
+			return !disabled
+		}
+	}
+
+	// Default to disabled
+	return false
+}
+
 // getOtlpEndpoint returns the OTLP endpoint from environment variables
 // It checks for signal-specific endpoint first, then falls back to the general endpoint
 // If no environment variable is set, it returns the default endpoint
@@ -74,24 +90,50 @@ type OtelProvider interface {
 
 func NewDefaultOtelProvider(ctx context.Context) (OtelProvider, error) {
 	op := otelProvider{}
-	tp, err := op.newDefaultTracerProvider(ctx)
-	if err != nil {
-		return nil, err
+
+	// Check if OpenTelemetry is enabled
+	if isOtelEnabled() {
+		// OpenTelemetry is enabled, create real providers
+		tp, err := op.newDefaultTracerProvider(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		mp, err := op.newDefaultMeterProvider(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		lp, err := op.newDefaultLoggerProvider(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		op.meterProvider = mp
+		op.loggerProvider = lp
+		op.tracerProvider = tp
+	} else {
+		// OpenTelemetry is disabled, create no-op providers
+		tp, err := op.newNoopTracerProvider()
+		if err != nil {
+			return nil, err
+		}
+
+		mp, err := op.newNoopMeterProvider()
+		if err != nil {
+			return nil, err
+		}
+
+		lp, err := op.newStdoutLoggerProvider()
+		if err != nil {
+			return nil, err
+		}
+
+		op.meterProvider = mp
+		op.loggerProvider = lp
+		op.tracerProvider = tp
 	}
 
-	mp, err := op.newDefaultMeterProvider(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	lp, err := op.newDefaultLoggerProvider(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	op.meterProvider = mp
-	op.loggerProvider = lp
-	op.tracerProvider = tp
 	op.prop = op.newDefaultPropagator()
 
 	return &op, nil
@@ -198,4 +240,37 @@ func (op *otelProvider) newDefaultLoggerProvider(ctx context.Context) (*log.Logg
 	slog.SetDefault(logger)
 
 	return loggerProvider, nil
+}
+
+// newStdoutLoggerProvider creates a logger provider that logs to standard output
+func (op *otelProvider) newStdoutLoggerProvider() (*log.LoggerProvider, error) {
+	// Create a standard output handler
+	handler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	})
+
+	// Set the default logger to use the standard output handler
+	logger := slog.New(handler)
+	slog.SetDefault(logger)
+
+	// Create a no-op logger provider
+	loggerProvider := log.NewLoggerProvider()
+
+	return loggerProvider, nil
+}
+
+// newNoopTracerProvider creates a no-op tracer provider
+func (op *otelProvider) newNoopTracerProvider() (*trace.TracerProvider, error) {
+	// Create a no-op tracer provider
+	tracerProvider := trace.NewTracerProvider()
+
+	return tracerProvider, nil
+}
+
+// newNoopMeterProvider creates a no-op meter provider
+func (op *otelProvider) newNoopMeterProvider() (*metric.MeterProvider, error) {
+	// Create a no-op meter provider
+	meterProvider := metric.NewMeterProvider()
+
+	return meterProvider, nil
 }

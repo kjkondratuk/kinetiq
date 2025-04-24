@@ -524,7 +524,7 @@ func parseMap(key string) map[string]string {
 				k := strings.TrimSpace(kv[0])
 				v := strings.TrimSpace(kv[1])
 				if k != "" {
-					result[key] = v
+					result[k] = v
 				}
 			} else {
 				slog.Error("Invalid map value specified for map parameter", slog.String("key", key), slog.String("value", fmt.Sprintf("%+v", pair)))
