@@ -52,11 +52,6 @@ func TestWasmProcessor_Start(t *testing.T) {
 
 		p, err := NewWasmProcessor(mockLoader, mockInputChannel)
 		assert.NoError(t, err)
-		//p := &wasmProcessor{
-		//	ldr:    mockLoader,
-		//	input:  mockInputChannel,
-		//	output: outputChannel,
-		//}
 
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -93,11 +88,6 @@ func TestWasmProcessor_Start(t *testing.T) {
 
 		p, err := NewWasmProcessor(mockLoader, mockInputChannel)
 		assert.NoError(t, err)
-		//p := &wasmProcessor{
-		//	ldr:    mockLoader,
-		//	input:  mockInputChannel,
-		//	output: outputChannel,
-		//}
 
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
