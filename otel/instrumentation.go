@@ -56,57 +56,6 @@ func (i *Instrumentation) RecordError(span trace.Span, err error, opts ...trace.
 	span.SetStatus(codes.Error, err.Error())
 }
 
-//// LogInfo logs an informational message
-//func (i *Instrumentation) LogInfo(ctx context.Context, msg string, attrs ...log.KeyValue) {
-//	r := log.Record{}
-//	r.SetBody(log.StringValue(msg))
-//	r.SetSeverity(log.SeverityInfo)
-//	now := time.Now()
-//	r.SetTimestamp(now)
-//	r.SetObservedTimestamp(now)
-//	r.AddAttributes(attrs...)
-//
-//	// Emit the log record
-//	i.logger.Emit(ctx, r)
-//
-//	// Also log to stdout for local development
-//	stdlog.Printf("[INFO] %s: %s", i.name, msg)
-//}
-//
-//// LogError logs an error message
-//func (i *Instrumentation) LogError(ctx context.Context, msg string, err error, attrs ...log.KeyValue) {
-//	r := log.Record{}
-//	r.SetBody(log.StringValue(msg))
-//	r.SetSeverity(log.SeverityError)
-//	now := time.Now()
-//	r.SetTimestamp(now)
-//	r.SetObservedTimestamp(now)
-//	r.AddAttributes(attrs...)
-//
-//	// Emit the log record
-//	i.logger.Emit(ctx, r)
-//
-//	// Also log to stdout for local development
-//	stdlog.Printf("[ERROR] %s: %s - %v", i.name, msg, err)
-//}
-//
-//// LogDebug logs a debug message
-//func (i *Instrumentation) LogDebug(ctx context.Context, msg string, attrs ...log.KeyValue) {
-//	r := log.Record{}
-//	r.SetBody(log.StringValue(msg))
-//	r.SetSeverity(log.SeverityDebug)
-//	now := time.Now()
-//	r.SetTimestamp(now)
-//	r.SetObservedTimestamp(now)
-//	r.AddAttributes(attrs...)
-//
-//	// Emit the log record
-//	i.logger.Emit(ctx, r)
-//
-//	// Also log to stdout for local development
-//	stdlog.Printf("[DEBUG] %s: %s", i.name, msg)
-//}
-
 // CreateCounter creates a new counter metric
 func (i *Instrumentation) CreateCounter(name, description string, opts ...metric.Int64CounterOption) (metric.Int64Counter, error) {
 	return i.meter.Int64Counter(name, metric.WithDescription(description), metric.WithUnit("1"))
