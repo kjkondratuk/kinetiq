@@ -9,6 +9,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
+	"log/slog"
 	"sync/atomic"
 )
 
@@ -18,10 +19,10 @@ type kafkaWriter struct {
 	input   <-chan processor.Result
 
 	// Instrumentation
-	instr                    *otel.Instrumentation
-	recordsWrittenCounter    metric.Int64Counter
-	writeErrorsCounter       metric.Int64Counter
-	processingTimeHistogram  metric.Float64Histogram
+	instr                   *otel.Instrumentation
+	recordsWrittenCounter   metric.Int64Counter
+	writeErrorsCounter      metric.Int64Counter
+	processingTimeHistogram metric.Float64Histogram
 }
 
 type KafkaClient interface {
@@ -72,11 +73,11 @@ func NewKafkaWriter(client KafkaClient, input <-chan processor.Result) (sink.Sin
 }
 
 func (w *kafkaWriter) Write(ctx context.Context) {
-	w.instr.LogInfo("Starting Kafka writer")
+	slog.Info("Starting Kafka writer")
 
 	// Create a new context with a span
-	ctx, span := w.instr.StartSpan(ctx, "KafkaWriter.Write")
-	defer span.End()
+	//ctx, span := w.instr.StartSpan(ctx, "KafkaWriter.Write")
+	//defer span.End()
 
 	for {
 		select {
@@ -84,12 +85,12 @@ func (w *kafkaWriter) Write(ctx context.Context) {
 			return
 		case input, ok := <-w.input:
 			if !ok {
-				w.instr.LogInfo("Kafka producer input channel closed")
+				slog.Info("Kafka producer input channel closed")
 				return
 			}
 
 			// Create a new context with a span for this record
-			writeCtx, writeSpan := w.instr.StartSpan(ctx, "KafkaWriter.WriteRecord")
+			writeCtx, writeSpan := w.instr.StartSpan(input.Ctx, "KafkaWriter.WriteRecord")
 
 			// Add attributes to the span
 			writeSpan.SetAttributes(
@@ -118,7 +119,7 @@ func (w *kafkaWriter) Write(ctx context.Context) {
 					// Record the error
 					w.instr.RecordError(writeSpan, err)
 					w.writeErrorsCounter.Add(writeCtx, 1)
-					w.instr.LogError("Error producing to Kafka", err)
+					slog.Info("Error producing to Kafka", err)
 				} else {
 					// Record successful write
 					w.recordsWrittenCounter.Add(writeCtx, 1)
@@ -133,6 +134,6 @@ func (w *kafkaWriter) Write(ctx context.Context) {
 }
 
 func (w *kafkaWriter) Close() {
-	w.instr.LogInfo("Closing Kafka writer")
+	slog.Info("Closing Kafka writer")
 	w.client.Close()
 }

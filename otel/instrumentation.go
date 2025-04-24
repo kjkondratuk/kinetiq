@@ -5,9 +5,10 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/log"
+	"go.opentelemetry.io/otel/log/global"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
-	"log"
 	"time"
 )
 
@@ -21,6 +22,7 @@ const (
 type Instrumentation struct {
 	tracer trace.Tracer
 	meter  metric.Meter
+	logger log.Logger
 	name   string
 }
 
@@ -34,6 +36,10 @@ func NewInstrumentation(name string) *Instrumentation {
 		meter: otel.GetMeterProvider().Meter(
 			instrumentationName,
 			metric.WithInstrumentationVersion(instrumentationVersion),
+		),
+		logger: global.GetLoggerProvider().Logger(
+			instrumentationName,
+			log.WithInstrumentationVersion(instrumentationVersion),
 		),
 		name: name,
 	}
@@ -50,20 +56,56 @@ func (i *Instrumentation) RecordError(span trace.Span, err error, opts ...trace.
 	span.SetStatus(codes.Error, err.Error())
 }
 
-// LogInfo logs an informational message
-func (i *Instrumentation) LogInfo(msg string, attrs ...attribute.KeyValue) {
-	log.Printf("[INFO] %s: %s", i.name, msg)
-}
-
-// LogError logs an error message
-func (i *Instrumentation) LogError(msg string, err error, attrs ...attribute.KeyValue) {
-	log.Printf("[ERROR] %s: %s - %v", i.name, msg, err)
-}
-
-// LogDebug logs a debug message
-func (i *Instrumentation) LogDebug(msg string, attrs ...attribute.KeyValue) {
-	log.Printf("[DEBUG] %s: %s", i.name, msg)
-}
+//// LogInfo logs an informational message
+//func (i *Instrumentation) LogInfo(ctx context.Context, msg string, attrs ...log.KeyValue) {
+//	r := log.Record{}
+//	r.SetBody(log.StringValue(msg))
+//	r.SetSeverity(log.SeverityInfo)
+//	now := time.Now()
+//	r.SetTimestamp(now)
+//	r.SetObservedTimestamp(now)
+//	r.AddAttributes(attrs...)
+//
+//	// Emit the log record
+//	i.logger.Emit(ctx, r)
+//
+//	// Also log to stdout for local development
+//	stdlog.Printf("[INFO] %s: %s", i.name, msg)
+//}
+//
+//// LogError logs an error message
+//func (i *Instrumentation) LogError(ctx context.Context, msg string, err error, attrs ...log.KeyValue) {
+//	r := log.Record{}
+//	r.SetBody(log.StringValue(msg))
+//	r.SetSeverity(log.SeverityError)
+//	now := time.Now()
+//	r.SetTimestamp(now)
+//	r.SetObservedTimestamp(now)
+//	r.AddAttributes(attrs...)
+//
+//	// Emit the log record
+//	i.logger.Emit(ctx, r)
+//
+//	// Also log to stdout for local development
+//	stdlog.Printf("[ERROR] %s: %s - %v", i.name, msg, err)
+//}
+//
+//// LogDebug logs a debug message
+//func (i *Instrumentation) LogDebug(ctx context.Context, msg string, attrs ...log.KeyValue) {
+//	r := log.Record{}
+//	r.SetBody(log.StringValue(msg))
+//	r.SetSeverity(log.SeverityDebug)
+//	now := time.Now()
+//	r.SetTimestamp(now)
+//	r.SetObservedTimestamp(now)
+//	r.AddAttributes(attrs...)
+//
+//	// Emit the log record
+//	i.logger.Emit(ctx, r)
+//
+//	// Also log to stdout for local development
+//	stdlog.Printf("[DEBUG] %s: %s", i.name, msg)
+//}
 
 // CreateCounter creates a new counter metric
 func (i *Instrumentation) CreateCounter(name, description string, opts ...metric.Int64CounterOption) (metric.Int64Counter, error) {

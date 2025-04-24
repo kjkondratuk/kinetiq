@@ -3,25 +3,28 @@ package kafka
 import (
 	"context"
 	"fmt"
+	"github.com/google/uuid"
 	"github.com/kjkondratuk/kinetiq/otel"
 	"github.com/kjkondratuk/kinetiq/source"
 	"github.com/twmb/franz-go/pkg/kgo"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
+	"log/slog"
 	"sync/atomic"
 	"time"
 )
 
 type kafkaReader struct {
+	ctx     context.Context
 	client  KafkaClient
 	enabled atomic.Bool
 	results chan source.Record
 
 	// Instrumentation
-	instr                    *otel.Instrumentation
-	recordsReadCounter       metric.Int64Counter
-	readErrorsCounter        metric.Int64Counter
-	processingTimeHistogram  metric.Float64Histogram
+	instr                   *otel.Instrumentation
+	recordsReadCounter      metric.Int64Counter
+	readErrorsCounter       metric.Int64Counter
+	processingTimeHistogram metric.Float64Histogram
 }
 
 type KafkaClient interface {
@@ -71,11 +74,11 @@ func NewKafkaReader(client KafkaClient) (source.Source, error) {
 }
 
 func (r *kafkaReader) Read(ctx context.Context) {
-	r.instr.LogInfo("Starting Kafka reader")
+	slog.Info("Starting Kafka reader")
 
 	// Create a new context with a span
-	ctx, span := r.instr.StartSpan(ctx, "KafkaReader.Read")
-	defer span.End()
+	//ctx, span := r.instr.StartSpan(ctx, "KafkaReader.Read")
+	//defer span.End()
 
 	for {
 		select {
@@ -92,7 +95,7 @@ func (r *kafkaReader) Read(ctx context.Context) {
 			if errs := fetches.Errors(); len(errs) > 0 {
 				// All errors are retried internally when fetching, but non-retriable errors are
 				// returned from polls so that users can notice and take action.
-				r.instr.LogError("Error polling fetches from Kafka", fmt.Errorf("%v", errs))
+				slog.Error("Error polling fetches from Kafka", fmt.Errorf("%v", errs))
 				r.readErrorsCounter.Add(ctx, 1)
 				panic(fmt.Sprint(errs))
 			}
@@ -101,8 +104,10 @@ func (r *kafkaReader) Read(ctx context.Context) {
 			for !iter.Done() {
 				record := iter.Next()
 
-				// Create a new context with a span for this record
-				recordCtx, recordSpan := r.instr.StartSpan(ctx, "KafkaReader.ProcessRecord")
+				// Create a new context with a span for this record, with a correlation ID
+				correlationID := uuid.New().String()
+				corrCtx := context.WithValue(ctx, "correlation_id", correlationID)
+				recordCtx, recordSpan := r.instr.StartSpan(corrCtx, "KafkaReader.ProcessRecord")
 
 				// Measure processing time
 				stopMeasure := r.instr.MeasureExecutionTime(recordCtx, r.processingTimeHistogram)
@@ -119,6 +124,7 @@ func (r *kafkaReader) Read(ctx context.Context) {
 					Headers: headers,
 					Key:     record.Key,
 					Value:   record.Value,
+					Ctx:     recordCtx,
 				}
 
 				// Add attributes to the span
@@ -146,18 +152,18 @@ func (r *kafkaReader) Output() <-chan source.Record {
 }
 
 func (r *kafkaReader) Close() {
-	r.instr.LogInfo("Closing Kafka reader")
+	slog.Info("Closing Kafka reader")
 	close(r.results)
 }
 
 // Enable turns on the KafkaReader
 func (r *kafkaReader) Enable() {
-	r.instr.LogInfo("Enabling Kafka reader")
+	slog.Info("Enabling Kafka reader")
 	r.enabled.Store(true)
 }
 
 // Disable turns off the KafkaReader
 func (r *kafkaReader) Disable() {
-	r.instr.LogInfo("Disabling Kafka reader")
+	slog.Info("Disabling Kafka reader")
 	r.enabled.Store(false)
 }

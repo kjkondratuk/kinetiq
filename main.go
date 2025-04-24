@@ -18,6 +18,7 @@ import (
 	source_kafka "github.com/kjkondratuk/kinetiq/source/kafka"
 	"github.com/twmb/franz-go/pkg/kgo"
 	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -26,15 +27,15 @@ import (
 )
 
 func main() {
-	ctx := context.Background()
 
 	// Handle SIGINT gracefully.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	baseCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	dp, err := otel.NewDefaultOtelProvider(ctx)
+	dp, err := otel.NewDefaultOtelProvider(baseCtx)
 	if err != nil {
-		log.Fatalf("Failed to create default otel provider: %s", err)
+		slog.Error("Failed to create default otel provider: %s", err)
+		os.Exit(1)
 	}
 
 	// Set up OpenTelemetry.
@@ -44,12 +45,13 @@ func main() {
 	}
 	// Handle shutdown properly so nothing leaks.
 	defer func() {
-		err = errors.Join(err, otelShutdown(ctx))
+		err = errors.Join(err, otelShutdown(baseCtx))
 	}()
 
-	appCfg, err := app_config.DefaultConfigurator.Configure(ctx)
+	appCfg, err := app_config.DefaultConfigurator.Configure(baseCtx)
 	if err != nil {
-		log.Fatalf("Failed to load configuration: %s", err)
+		slog.Error("Failed to load configuration: %s", err)
+		os.Exit(1)
 	}
 
 	var dl loader.Loader
@@ -62,7 +64,7 @@ func main() {
 	} else {
 		dl = loader.NewBasicReloader(appCfg.PluginRef)
 	}
-	defer dl.Close(ctx)
+	defer dl.Close(baseCtx)
 
 	log.Print("Plugin environment loaded...\n")
 
@@ -71,7 +73,8 @@ func main() {
 	log.Printf("Connecting to kafka source brokers: %s", appCfg.Kafka.SourceBrokers)
 	readerClient, err := kgo.NewClient(consumerOpts...)
 	if err != nil {
-		log.Fatal("Failed to create kafka reader client", err)
+		slog.Error("Failed to create kafka reader client", err)
+		os.Exit(1)
 	}
 	defer readerClient.Close()
 
@@ -80,7 +83,8 @@ func main() {
 	// Create Kafka reader with instrumentation
 	reader, err := source_kafka.NewKafkaReader(readerClient)
 	if err != nil {
-		log.Fatal("Failed to create kafka reader", err)
+		slog.Error("Failed to create kafka reader", err)
+		os.Exit(1)
 	}
 	defer reader.Close()
 
@@ -89,7 +93,8 @@ func main() {
 	// Create WASM processor with instrumentation
 	proc, err := processor.NewWasmProcessor(dl, reader.Output())
 	if err != nil {
-		log.Fatal("Failed to create wasm processor", err)
+		slog.Error("Failed to create wasm processor", err)
+		os.Exit(1)
 	}
 	defer proc.Close()
 
@@ -103,7 +108,8 @@ func main() {
 		producerOpts...,
 	)
 	if err != nil {
-		log.Fatal("Failed to create kafka writer client", err)
+		slog.Error("Failed to create kafka writer client", err)
+		os.Exit(1)
 	}
 	defer writerClient.Close()
 
@@ -112,20 +118,30 @@ func main() {
 	// Create Kafka writer with instrumentation
 	writer, err := sink_kafka.NewKafkaWriter(writerClient, proc.Output())
 	if err != nil {
-		log.Fatal("Failed to create kafka writer", err)
+		slog.Error("Failed to create kafka writer", err)
+		os.Exit(1)
 	}
 	defer writer.Close()
 
+	writerCtx, wc := context.WithCancel(baseCtx)
+	defer wc()
+
 	log.Print("Writer configured...")
 
-	go writer.Write(ctx)
+	go writer.Write(writerCtx)
 	log.Print("Writer started...")
 
-	go proc.Start(ctx)
+	procCtx, pc := context.WithCancel(baseCtx)
+	defer pc()
+
+	go proc.Start(procCtx)
 
 	log.Print("Processor started...")
 
-	go reader.Read(ctx)
+	readCtx, rc := context.WithCancel(baseCtx)
+	defer rc()
+
+	go reader.Read(readCtx)
 
 	log.Print("Reader started...")
 
@@ -144,15 +160,16 @@ func main() {
 			appCfg.S3.ChangeQueue, opts...)
 
 		// start watching for S3 Notification Events
-		go watcher.StartEvents(ctx)
+		go watcher.StartEvents(baseCtx)
 
 		// Listen to events and process them
-		go watcher.Listen(ctx, detection.S3NotificationPluginReloadResponder(ctx, appCfg.PluginRef, appCfg.S3.Bucket, dl))
+		go watcher.Listen(baseCtx, detection.S3NotificationPluginReloadResponder(baseCtx, appCfg.PluginRef, appCfg.S3.Bucket, dl))
 	} else {
 		// listen for changes from local file listener
 		w, err := fsnotify.NewWatcher()
 		if err != nil {
-			log.Fatalf("failed to create path watcher: %s", err)
+			slog.Error("failed to create path watcher: %s", err)
+			os.Exit(1)
 		}
 		defer w.Close()
 
@@ -161,13 +178,17 @@ func main() {
 
 		err = w.Add(parentDir)
 		if err != nil {
-			log.Fatalf("failed to add path to watcher: %s", err)
+			slog.Error("failed to add path to watcher: %s", err)
+			os.Exit(1)
 		}
 
 		watcher := detection.NewListener[fsnotify.Event](detection.NewWatcher(w.Events, w.Errors))
 
-		go watcher.Listen(ctx, detection.FilesystemNotificationPluginReloadResponder(ctx, dl))
+		go watcher.Listen(baseCtx, detection.FilesystemNotificationPluginReloadResponder(baseCtx, dl))
 	}
+
+	httpCtx, hc := context.WithCancel(baseCtx)
+	defer hc()
 
 	r := chi.NewRouter()
 
@@ -179,13 +200,16 @@ func main() {
 	r.Use(middleware.OtelMiddleware(httpInstr))
 
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
+		_, healthSpan := httpInstr.StartSpan(httpCtx, "HttpServer.HealthCheck")
+		defer healthSpan.End()
+
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
 	})
 
 	srv := &http.Server{
 		Addr:        ":8080",
-		BaseContext: func(_ net.Listener) context.Context { return ctx },
+		BaseContext: func(_ net.Listener) context.Context { return httpCtx },
 		// TODO : make server timeouts configurable
 		//ReadTimeout:  time.Second,
 		//WriteTimeout: 10 * time.Second,
@@ -200,7 +224,7 @@ func main() {
 	select {
 	case err = <-srvErr:
 		return
-	case <-ctx.Done():
+	case <-baseCtx.Done():
 		stop()
 	}
 

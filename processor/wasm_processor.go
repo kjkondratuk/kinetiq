@@ -9,6 +9,7 @@ import (
 	"github.com/kjkondratuk/kinetiq/source"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
+	"log/slog"
 )
 
 type wasmProcessor struct {
@@ -17,10 +18,10 @@ type wasmProcessor struct {
 	output chan Result
 
 	// Instrumentation
-	instr                    *otel.Instrumentation
-	processingTimeHistogram  metric.Float64Histogram
-	recordsProcessedCounter  metric.Int64Counter
-	processingErrorsCounter  metric.Int64Counter
+	instr                   *otel.Instrumentation
+	processingTimeHistogram metric.Float64Histogram
+	recordsProcessedCounter metric.Int64Counter
+	processingErrorsCounter metric.Int64Counter
 }
 
 // NewWasmProcessor creates a new WASM processor with OpenTelemetry instrumentation
@@ -71,11 +72,11 @@ func (p *wasmProcessor) Output() <-chan Result {
 }
 
 func (p *wasmProcessor) Start(ctx context.Context) {
-	p.instr.LogInfo("Starting WASM processor")
+	slog.Info("Starting WASM processor")
 
 	// Create a new context with a span
-	ctx, span := p.instr.StartSpan(ctx, "WasmProcessor.Start")
-	defer span.End()
+	//ctx, span := p.instr.StartSpan(ctx, "WasmProcessor.Start")
+	//defer span.End()
 
 	for {
 		select {
@@ -87,7 +88,7 @@ func (p *wasmProcessor) Start(ctx context.Context) {
 			}
 
 			// Create a new context with a span for this record
-			processCtx, processSpan := p.instr.StartSpan(ctx, "WasmProcessor.process")
+			processCtx, processSpan := p.instr.StartSpan(record.Ctx, "WasmProcessor.process")
 
 			// Add attributes to the span
 			processSpan.SetAttributes(
@@ -104,7 +105,7 @@ func (p *wasmProcessor) Start(ctx context.Context) {
 				// Record the error
 				p.instr.RecordError(processSpan, err)
 				p.processingErrorsCounter.Add(processCtx, 1)
-				p.instr.LogError("Error processing record", err)
+				slog.Error("Error processing record", err)
 				processSpan.End()
 				stopMeasure()
 				continue
@@ -167,10 +168,11 @@ func (p *wasmProcessor) process(ctx context.Context, record source.Record) (Resu
 		Key:     res.Key,
 		Value:   res.Value,
 		Headers: hdr,
+		Ctx:     ctx,
 	}, nil
 }
 
 func (p *wasmProcessor) Close() {
-	p.instr.LogInfo("Closing WASM processor")
+	slog.Info("Closing WASM processor")
 	close(p.output)
 }

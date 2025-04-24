@@ -2,6 +2,7 @@ package otel
 
 import (
 	"context"
+	"go.opentelemetry.io/contrib/bridges/otelslog"
 	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
@@ -9,6 +10,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/log"
 	"go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/trace"
+	"log/slog"
 	"os"
 	"strconv"
 	"time"
@@ -191,5 +193,9 @@ func (op *otelProvider) newDefaultLoggerProvider(ctx context.Context) (*log.Logg
 	loggerProvider := log.NewLoggerProvider(
 		log.WithProcessor(log.NewBatchProcessor(logExporter)),
 	)
+	otelHandler := otelslog.NewHandler("", otelslog.WithLoggerProvider(loggerProvider))
+	logger := slog.New(otelHandler)
+	slog.SetDefault(logger)
+
 	return loggerProvider, nil
 }

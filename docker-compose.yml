@@ -49,7 +49,7 @@ services:
             context: .
         ports:
             - "8080:8080"
-        profiles:x
+        profiles:
             - minimal
             - otel
             - all
@@ -64,6 +64,11 @@ services:
             - ./examples/test_module/test_module.wasm:/root/examples/test_module/test_module.wasm:ro
         depends_on:
             - kafka-topic-creator
+        logging:
+            driver: "json-file"
+            options:
+                max-size: "10m"
+                max-file: "3"
     prometheus:
         container_name: prometheus
         image: prom/prometheus:latest
@@ -111,6 +116,8 @@ services:
             - --config=/etc/otelcol-contrib/config.yaml
         volumes:
             - ./otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml
+        depends_on:
+            - loki
 
     jaeger:
         container_name: jaeger

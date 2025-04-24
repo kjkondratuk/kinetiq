@@ -12,6 +12,7 @@ import (
 	"github.com/twmb/franz-go/pkg/sasl/plain"
 	"github.com/twmb/franz-go/pkg/sasl/scram"
 	"log"
+	"log/slog"
 	"os"
 	"slices"
 	"strconv"
@@ -216,7 +217,8 @@ func (c configurator) Configure(ctx context.Context) (Config, error) {
 	if s3Enabled || producerSaslMechanism == "aws-iam" || consumerSaslMechanism == "aws-iam" {
 		awsCfg, err := config.LoadDefaultConfig(ctx)
 		if err != nil {
-			log.Fatalf("failed to load AWS config: %e", err)
+			slog.Error("failed to load AWS config", slog.String("err", err.Error()))
+			os.Exit(1)
 		}
 		cfg.Aws = &awsCfg
 	}
@@ -232,19 +234,23 @@ func (c configurator) CreateKafkaClientOptions(conf SharedKafkaConfig, name stri
 		saslTypes := []string{"plain", "sasl-scram-512", "sasl-scram-256"}
 		if slices.Contains(saslTypes, conf.SASLMechanism) &&
 			conf.SASLUser == "" {
-			log.Fatalf("%s_SASL_MECHANISM %s requires %s_SASL_USER to be set", name, conf.SASLMechanism, name)
+			slog.Error(fmt.Sprintf("%s_SASL_MECHANISM %s requires %s_SASL_USER to be set", name, conf.SASLMechanism, name))
+			os.Exit(1)
 		}
 
 		if slices.Contains(saslTypes, conf.SASLMechanism) && conf.SASLPassword == "" {
-			log.Fatalf("%s_SASL_MECHANISM %s requires %s_SASL_PASSWORD to be set", name, conf.SASLMechanism, name)
+			slog.Error(fmt.Sprintf("%s_SASL_MECHANISM %s requires %s_SASL_PASSWORD to be set", name, conf.SASLMechanism, name))
+			os.Exit(1)
 		}
 
 		if conf.SASLMechanism == "oauth" && conf.SASLToken == "" {
-			log.Fatalf("%s_SASL_MECHANISM %s requires %s_SASL_TOKEN to be set", name, conf.SASLMechanism, name)
+			slog.Error(fmt.Sprintf("%s_SASL_MECHANISM %s requires %s_SASL_TOKEN to be set", name, conf.SASLMechanism, name))
+			os.Exit(1)
 		}
 
 		if conf.SASLMechanism == "aws-iam" && awsConf == nil {
-			log.Fatalf("%s_SASL_MECHANISM %s requires a valid AWS config", name, conf.SASLMechanism)
+			slog.Error(fmt.Sprintf("%s_SASL_MECHANISM %s requires a valid AWS config", name, conf.SASLMechanism))
+			os.Exit(1)
 		}
 	}
 
@@ -521,7 +527,7 @@ func parseMap(key string) map[string]string {
 					result[key] = v
 				}
 			} else {
-				log.Fatalf("Invalid map value specified for: key: %s - value: %s", key, pair)
+				slog.Error("Invalid map value specified for map parameter", slog.String("key", key), slog.String("value", fmt.Sprintf("%+v", pair)))
 			}
 		}
 	}

@@ -7,6 +7,7 @@ import (
 	"github.com/kjkondratuk/kinetiq/plugin/functions"
 	"github.com/tetratelabs/wazero"
 	"log"
+	"log/slog"
 	"os"
 	"sync"
 )
@@ -26,7 +27,7 @@ func (l *defaultPluginLoader) load(ctx context.Context, mutex *sync.Mutex, path 
 			WithStderr(os.Stderr),
 	))
 	if err != nil {
-		log.Fatal("Failed to setup plugin environment", err)
+		slog.Error("Failed to setup plugin environment", slog.String("err", err.Error()))
 	}
 	log.Printf("Plugin environment setup...\n")
 
@@ -65,7 +66,7 @@ type closeablePlugin interface {
 
 func (r *lazyReloader) Resolve(ctx context.Context) {
 	// empty because we don't need to resolve local files
-	fmt.Println("Resolving local file")
+	slog.Info("Resolving local file")
 }
 
 func (r *lazyReloader) Get(ctx context.Context) (v1.ModuleService, error) {
