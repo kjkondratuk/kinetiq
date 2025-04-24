@@ -34,7 +34,7 @@ func main() {
 
 	dp, err := otel.NewDefaultOtelProvider(baseCtx)
 	if err != nil {
-		slog.Error("Failed to create default otel provider: %s", err)
+		slog.Error("Failed to create default otel provider", "error", err)
 		os.Exit(1)
 	}
 
@@ -50,7 +50,7 @@ func main() {
 
 	appCfg, err := app_config.DefaultConfigurator.Configure(baseCtx)
 	if err != nil {
-		slog.Error("Failed to load configuration: %s", err)
+		slog.Error("Failed to load configuration", "error", err)
 		os.Exit(1)
 	}
 
@@ -73,7 +73,7 @@ func main() {
 	log.Printf("Connecting to kafka source brokers: %s", appCfg.Kafka.SourceBrokers)
 	readerClient, err := kgo.NewClient(consumerOpts...)
 	if err != nil {
-		slog.Error("Failed to create kafka reader client", err)
+		slog.Error("Failed to create kafka reader client", "error", err)
 		os.Exit(1)
 	}
 	defer readerClient.Close()
@@ -83,7 +83,7 @@ func main() {
 	// Create Kafka reader with instrumentation
 	reader, err := source_kafka.NewKafkaReader(readerClient)
 	if err != nil {
-		slog.Error("Failed to create kafka reader", err)
+		slog.Error("Failed to create kafka reader", "error", err)
 		os.Exit(1)
 	}
 	defer reader.Close()
@@ -93,7 +93,7 @@ func main() {
 	// Create WASM processor with instrumentation
 	proc, err := processor.NewWasmProcessor(dl, reader.Output())
 	if err != nil {
-		slog.Error("Failed to create wasm processor", err)
+		slog.Error("Failed to create wasm processor", "error", err)
 		os.Exit(1)
 	}
 	defer proc.Close()
@@ -108,7 +108,7 @@ func main() {
 		producerOpts...,
 	)
 	if err != nil {
-		slog.Error("Failed to create kafka writer client", err)
+		slog.Error("Failed to create kafka writer client", "error", err)
 		os.Exit(1)
 	}
 	defer writerClient.Close()
@@ -118,7 +118,7 @@ func main() {
 	// Create Kafka writer with instrumentation
 	writer, err := sink_kafka.NewKafkaWriter(writerClient, proc.Output())
 	if err != nil {
-		slog.Error("Failed to create kafka writer", err)
+		slog.Error("Failed to create kafka writer", "error", err)
 		os.Exit(1)
 	}
 	defer writer.Close()
@@ -168,7 +168,7 @@ func main() {
 		// listen for changes from local file listener
 		w, err := fsnotify.NewWatcher()
 		if err != nil {
-			slog.Error("failed to create path watcher: %s", err)
+			slog.Error("failed to create path watcher", "error", err)
 			os.Exit(1)
 		}
 		defer w.Close()
@@ -178,7 +178,7 @@ func main() {
 
 		err = w.Add(parentDir)
 		if err != nil {
-			slog.Error("failed to add path to watcher: %s", err)
+			slog.Error("failed to add path to watcher", "error", err)
 			os.Exit(1)
 		}
 

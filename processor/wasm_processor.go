@@ -105,7 +105,7 @@ func (p *wasmProcessor) Start(ctx context.Context) {
 				// Record the error
 				p.instr.RecordError(processSpan, err)
 				p.processingErrorsCounter.Add(processCtx, 1)
-				slog.Error("Error processing record", err)
+				slog.Error("Error processing record", "error", err)
 				processSpan.End()
 				stopMeasure()
 				continue

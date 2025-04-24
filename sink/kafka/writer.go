@@ -119,7 +119,7 @@ func (w *kafkaWriter) Write(ctx context.Context) {
 					// Record the error
 					w.instr.RecordError(writeSpan, err)
 					w.writeErrorsCounter.Add(writeCtx, 1)
-					slog.Info("Error producing to Kafka", err)
+					slog.Info("Error producing to Kafka", "error", err)
 				} else {
 					// Record successful write
 					w.recordsWrittenCounter.Add(writeCtx, 1)

@@ -95,7 +95,7 @@ func (r *kafkaReader) Read(ctx context.Context) {
 			if errs := fetches.Errors(); len(errs) > 0 {
 				// All errors are retried internally when fetching, but non-retriable errors are
 				// returned from polls so that users can notice and take action.
-				slog.Error("Error polling fetches from Kafka", fmt.Errorf("%v", errs))
+				slog.Error("Error polling fetches from Kafka", "error", fmt.Errorf("%v", errs))
 				r.readErrorsCounter.Add(ctx, 1)
 				panic(fmt.Sprint(errs))
 			}
