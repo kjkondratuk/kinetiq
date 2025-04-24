@@ -36,12 +36,14 @@ func TestKafkaWriter_Write(t *testing.T) {
 			},
 			input: func() chan processor.Result {
 				ch := make(chan processor.Result, 1)
+				ctx := context.Background()
 				ch <- processor.Result{
 					Key:   []byte("key"),
 					Value: []byte("value"),
 					Headers: []processor.RecordHeader{
 						{Key: "header-key", Value: []byte("header-value")},
 					},
+					Ctx: ctx,
 				}
 				return ch
 			}(),
@@ -62,9 +64,11 @@ func TestKafkaWriter_Write(t *testing.T) {
 			},
 			input: func() chan processor.Result {
 				ch := make(chan processor.Result, 1)
+				ctx := context.Background()
 				ch <- processor.Result{
 					Key:   []byte("key"),
 					Value: []byte("value"),
+					Ctx: ctx,
 				}
 				return ch
 			}(),
@@ -94,7 +98,10 @@ func TestKafkaWriter_Write(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			mockClient := tc.setupMocks()
 
-			writer := NewKafkaWriter(mockClient, tc.input)
+			writer, err := NewKafkaWriter(mockClient, tc.input)
+			if err != nil {
+				t.Fatalf("Failed to create Kafka writer: %v", err)
+			}
 			defer close(tc.input)
 
 			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)

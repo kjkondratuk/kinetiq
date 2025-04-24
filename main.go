@@ -2,29 +2,56 @@ package main
 
 import (
 	"context"
+	"errors"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/fsnotify/fsnotify"
 	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
+	chi_middleware "github.com/go-chi/chi/v5/middleware"
 	app_config "github.com/kjkondratuk/kinetiq/config"
 	"github.com/kjkondratuk/kinetiq/detection"
 	"github.com/kjkondratuk/kinetiq/loader"
+	"github.com/kjkondratuk/kinetiq/middleware"
+	"github.com/kjkondratuk/kinetiq/otel"
 	"github.com/kjkondratuk/kinetiq/processor"
 	sink_kafka "github.com/kjkondratuk/kinetiq/sink/kafka"
 	source_kafka "github.com/kjkondratuk/kinetiq/source/kafka"
 	"github.com/twmb/franz-go/pkg/kgo"
 	"log"
+	"log/slog"
+	"net"
 	"net/http"
+	"os"
+	"os/signal"
 	"strings"
 )
 
 func main() {
-	ctx := context.Background()
 
-	appCfg, err := app_config.DefaultConfigurator.Configure(ctx)
+	// Handle SIGINT gracefully.
+	baseCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
+	dp, err := otel.NewDefaultOtelProvider(baseCtx)
 	if err != nil {
-		log.Fatalf("Failed to load configuration: %s", err)
+		slog.Error("Failed to create default otel provider", "error", err)
+		os.Exit(1)
+	}
+
+	// Set up OpenTelemetry.
+	otelShutdown, err := otel.NewOtelSdk(dp).Configure()
+	if err != nil {
+		return
+	}
+	// Handle shutdown properly so nothing leaks.
+	defer func() {
+		err = errors.Join(err, otelShutdown(baseCtx))
+	}()
+
+	appCfg, err := app_config.DefaultConfigurator.Configure(baseCtx)
+	if err != nil {
+		slog.Error("Failed to load configuration", "error", err)
+		os.Exit(1)
 	}
 
 	var dl loader.Loader
@@ -37,7 +64,7 @@ func main() {
 	} else {
 		dl = loader.NewBasicReloader(appCfg.PluginRef)
 	}
-	defer dl.Close(ctx)
+	defer dl.Close(baseCtx)
 
 	log.Print("Plugin environment loaded...\n")
 
@@ -46,18 +73,29 @@ func main() {
 	log.Printf("Connecting to kafka source brokers: %s", appCfg.Kafka.SourceBrokers)
 	readerClient, err := kgo.NewClient(consumerOpts...)
 	if err != nil {
-		log.Fatal("Failed to create kafka reader client", err)
+		slog.Error("Failed to create kafka reader client", "error", err)
+		os.Exit(1)
 	}
 	defer readerClient.Close()
 
 	log.Print("Reader client configured...")
 
-	reader := source_kafka.NewKafkaReader(readerClient)
+	// Create Kafka reader with instrumentation
+	reader, err := source_kafka.NewKafkaReader(readerClient)
+	if err != nil {
+		slog.Error("Failed to create kafka reader", "error", err)
+		os.Exit(1)
+	}
 	defer reader.Close()
 
 	log.Print("Reader configured...")
 
-	proc := processor.NewWasmProcessor(dl, reader.Output())
+	// Create WASM processor with instrumentation
+	proc, err := processor.NewWasmProcessor(dl, reader.Output())
+	if err != nil {
+		slog.Error("Failed to create wasm processor", "error", err)
+		os.Exit(1)
+	}
 	defer proc.Close()
 
 	log.Print("Processor configured...")
@@ -70,25 +108,40 @@ func main() {
 		producerOpts...,
 	)
 	if err != nil {
-		log.Fatal("Failed to create kafka writer client", err)
+		slog.Error("Failed to create kafka writer client", "error", err)
+		os.Exit(1)
 	}
 	defer writerClient.Close()
 
 	log.Print("Writer client configured...")
 
-	writer := sink_kafka.NewKafkaWriter(writerClient, proc.Output())
+	// Create Kafka writer with instrumentation
+	writer, err := sink_kafka.NewKafkaWriter(writerClient, proc.Output())
+	if err != nil {
+		slog.Error("Failed to create kafka writer", "error", err)
+		os.Exit(1)
+	}
 	defer writer.Close()
+
+	writerCtx, wc := context.WithCancel(baseCtx)
+	defer wc()
 
 	log.Print("Writer configured...")
 
-	go writer.Write(ctx)
+	go writer.Write(writerCtx)
 	log.Print("Writer started...")
 
-	go proc.Start(ctx)
+	procCtx, pc := context.WithCancel(baseCtx)
+	defer pc()
+
+	go proc.Start(procCtx)
 
 	log.Print("Processor started...")
 
-	go reader.Read(ctx)
+	readCtx, rc := context.WithCancel(baseCtx)
+	defer rc()
+
+	go reader.Read(readCtx)
 
 	log.Print("Reader started...")
 
@@ -107,15 +160,16 @@ func main() {
 			appCfg.S3.ChangeQueue, opts...)
 
 		// start watching for S3 Notification Events
-		go watcher.StartEvents(ctx)
+		go watcher.StartEvents(baseCtx)
 
 		// Listen to events and process them
-		go watcher.Listen(ctx, detection.S3NotificationPluginReloadResponder(ctx, appCfg.PluginRef, appCfg.S3.Bucket, dl))
+		go watcher.Listen(baseCtx, detection.S3NotificationPluginReloadResponder(baseCtx, appCfg.PluginRef, appCfg.S3.Bucket, dl))
 	} else {
 		// listen for changes from local file listener
 		w, err := fsnotify.NewWatcher()
 		if err != nil {
-			log.Fatalf("failed to create path watcher: %s", err)
+			slog.Error("failed to create path watcher", "error", err)
+			os.Exit(1)
 		}
 		defer w.Close()
 
@@ -124,30 +178,56 @@ func main() {
 
 		err = w.Add(parentDir)
 		if err != nil {
-			log.Fatalf("failed to add path to watcher: %s", err)
+			slog.Error("failed to add path to watcher", "error", err)
+			os.Exit(1)
 		}
 
 		watcher := detection.NewListener[fsnotify.Event](detection.NewWatcher(w.Events, w.Errors))
 
-		go watcher.Listen(ctx, detection.FilesystemNotificationPluginReloadResponder(ctx, dl))
+		go watcher.Listen(baseCtx, detection.FilesystemNotificationPluginReloadResponder(baseCtx, dl))
 	}
+
+	httpCtx, hc := context.WithCancel(baseCtx)
+	defer hc()
 
 	r := chi.NewRouter()
 
-	// Middleware
-	r.Use(middleware.Logger)
-	r.Use(middleware.Recoverer)
+	r.Use(chi_middleware.Logger)
+	r.Use(chi_middleware.Recoverer)
 
-	// Routes
+	// Add OpenTelemetry middleware
+	httpInstr := otel.NewInstrumentation("http_server")
+	r.Use(middleware.OtelMiddleware(httpInstr))
+
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
+		_, healthSpan := httpInstr.StartSpan(httpCtx, "HttpServer.HealthCheck")
+		defer healthSpan.End()
+
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
 	})
 
-	// Start Server
-	log.Println("Starting server on :8080")
-	err = http.ListenAndServe(":8080", r)
-	if err != nil {
-		log.Fatal("Server error", err)
+	srv := &http.Server{
+		Addr:        ":8080",
+		BaseContext: func(_ net.Listener) context.Context { return httpCtx },
+		// TODO : make server timeouts configurable
+		//ReadTimeout:  time.Second,
+		//WriteTimeout: 10 * time.Second,
+		Handler: r,
 	}
+	srvErr := make(chan error, 1)
+	go func() {
+		srvErr <- srv.ListenAndServe()
+	}()
+
+	// Wait for interruption.
+	select {
+	case err = <-srvErr:
+		return
+	case <-baseCtx.Done():
+		stop()
+	}
+
+	err = srv.Shutdown(context.Background())
+	return
 }

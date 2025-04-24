@@ -4,7 +4,7 @@ import (
 	"context"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"io"
-	"log"
+	"log/slog"
 	"os"
 )
 
@@ -36,7 +36,8 @@ func (l *s3Loader) Resolve(ctx context.Context) {
 	// Define a file to download to
 	outFile, err := os.Create(l.path)
 	if err != nil {
-		log.Fatalf("failed to create file for S3 download: %v", err)
+		slog.Error("failed to create file for S3 download", slog.String("err", err.Error()))
+		return
 	}
 	defer outFile.Close()
 
@@ -46,15 +47,20 @@ func (l *s3Loader) Resolve(ctx context.Context) {
 		Key:    &l.path,
 	})
 	if err != nil {
-		log.Fatalf("failed to download file from S3: %v", err)
+		slog.Error("failed to download file from S3", slog.String("err", err.Error()))
+		return
 	}
 	defer getObjectOutput.Body.Close()
 
 	// Write the data to the locally created file
 	_, err = io.Copy(outFile, getObjectOutput.Body)
 	if err != nil {
-		log.Fatalf("failed to write downloaded file to local disk: %v", err)
+		slog.Error("failed to write downloaded file to local disk", slog.String("err", err.Error()))
+		return
 	}
 
-	log.Printf("Successfully downloaded %s from bucket %s to %s", l.path, l.bucket, l.path)
+	slog.Info("Successfully downloaded artifact from bucket",
+		slog.String("path", l.path),
+		slog.String("bucket", l.bucket),
+	)
 }

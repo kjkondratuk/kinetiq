@@ -9,6 +9,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
 	"github.com/kjkondratuk/kinetiq/loader"
 	"log"
+	"log/slog"
 	"time"
 )
 
@@ -91,7 +92,7 @@ func NewS3SqsWatcher(client SqsClient, url string, opts ...SqsWatcherOpt) SqsWat
 // StartEvents : starts listening for S3 change event notifications on the specified SQS topic, publishing
 // events to the listener event channel when one is received
 func (s *sqsWatcher) StartEvents(ctx context.Context) {
-	fmt.Println("S3 notification listener started...")
+	slog.Info("S3 notification listener started...")
 
 	go func() {
 		for {
@@ -147,11 +148,11 @@ func (s *sqsWatcher) process(ctx context.Context, message types.Message) {
 			return
 		}
 
-		fmt.Printf("S3 notification deleted: %s\n", *message.MessageId)
+		slog.Info("S3 notification deleted", slog.String("messageId", *message.MessageId))
 		return
 	}
 
-	fmt.Printf("Received empty S3 message: %s\n", *message.MessageId)
+	slog.Info("Received empty S3 message", slog.String("messageId", *message.MessageId))
 }
 
 // Listen : delegates to the underlying listener implementation

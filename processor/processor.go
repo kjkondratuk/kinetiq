@@ -5,6 +5,7 @@ import (
 )
 
 type Result struct {
+	Ctx     context.Context
 	Headers []RecordHeader
 	Key     []byte
 	Value   []byte

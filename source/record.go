@@ -1,6 +1,9 @@
 package source
 
+import "context"
+
 type Record struct {
+	Ctx     context.Context
 	Headers []RecordHeader
 	Key     []byte
 	Value   []byte

@@ -105,7 +105,8 @@ func TestKafkaReader_Read(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			reader := NewKafkaReader(tt.setupMocks())
+			reader, err := NewKafkaReader(tt.setupMocks())
+			assert.NoError(t, err)
 
 			ctx, cancel := context.WithTimeout(t.Context(), 1*time.Second)
 			defer cancel()
@@ -130,7 +131,10 @@ func TestKafkaReader_Read(t *testing.T) {
 				for _, expected := range tt.expected {
 					select {
 					case result := <-reader.Output():
-						assert.Equal(t, expected, result)
+						// Compare only the fields we care about, ignoring the context
+						assert.Equal(t, expected.Headers, result.Headers)
+						assert.Equal(t, expected.Key, result.Key)
+						assert.Equal(t, expected.Value, result.Value)
 					case <-time.After(1 * time.Second):
 						t.Fatal("timed out waiting for results")
 					}
@@ -177,8 +181,9 @@ func TestKafkaReader_Close(t *testing.T) {
 
 func TestNewKafkaReader(t *testing.T) {
 	mockClient := new(MockKafkaClient)
-	reader := NewKafkaReader(mockClient)
+	reader, err := NewKafkaReader(mockClient)
 
+	assert.NoError(t, err)
 	assert.NotNil(t, reader)
 	assert.IsType(t, &kafkaReader{}, reader)
 	assert.True(t, reader.(*kafkaReader).enabled.Load())

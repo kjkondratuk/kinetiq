@@ -27,14 +27,16 @@ func TestWasmProcessor_Start(t *testing.T) {
 		mockModuleService := &v1.MockmoduleService{}
 		mockLoader := &loader.MockLoader{}
 		mockInputChannel := make(chan source.Record, 1)
-		outputChannel := make(chan Result, 1)
+		//outputChannel := make(chan Result, 1)
 
+		ctx := context.Background()
 		inputRecord := source.Record{
 			Key:   []byte("input-key"),
 			Value: []byte("input-value"),
 			Headers: []source.RecordHeader{
 				{Key: "header-key", Value: []byte("header-value")},
 			},
+			Ctx: ctx,
 		}
 		mockInputChannel <- inputRecord
 
@@ -48,11 +50,8 @@ func TestWasmProcessor_Start(t *testing.T) {
 		mockModuleService.On("Process", mock.Anything, mock.Anything).Return(expectedResponse, nil)
 		mockLoader.On("Get", mock.Anything).Return(mockModuleService, nil)
 
-		p := &wasmProcessor{
-			ldr:    mockLoader,
-			input:  mockInputChannel,
-			output: outputChannel,
-		}
+		p, err := NewWasmProcessor(mockLoader, mockInputChannel)
+		assert.NoError(t, err)
 
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -73,23 +72,22 @@ func TestWasmProcessor_Start(t *testing.T) {
 		mockInputChannel := make(chan source.Record, 1)
 		outputChannel := make(chan Result, 1)
 
+		ctx := context.Background()
 		inputRecord := source.Record{
 			Key:   []byte("input-key"),
 			Value: []byte("input-value"),
 			Headers: []source.RecordHeader{
 				{Key: "header-key", Value: []byte("header-value")},
 			},
+			Ctx: ctx,
 		}
 		mockInputChannel <- inputRecord
 
 		mockModuleService.On("Process", mock.Anything, mock.Anything).Return(nil, errors.New("processing error"))
 		mockLoader.On("Get", mock.Anything).Return(mockModuleService, nil)
 
-		p := &wasmProcessor{
-			ldr:    mockLoader,
-			input:  mockInputChannel,
-			output: outputChannel,
-		}
+		p, err := NewWasmProcessor(mockLoader, mockInputChannel)
+		assert.NoError(t, err)
 
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -110,12 +108,14 @@ func TestWasmProcessor_process(t *testing.T) {
 		mockModuleService := &v1.MockmoduleService{}
 		mockLoader := &loader.MockLoader{}
 
+		ctx := context.Background()
 		inputRecord := source.Record{
 			Key:   []byte("input-key"),
 			Value: []byte("input-value"),
 			Headers: []source.RecordHeader{
 				{Key: "header-key", Value: []byte("header-value")},
 			},
+			Ctx: ctx,
 		}
 
 		expectedResponse := &v1.ProcessResponse{
@@ -149,12 +149,14 @@ func TestWasmProcessor_process(t *testing.T) {
 		mockModuleService := &v1.MockmoduleService{}
 		mockLoader := &loader.MockLoader{}
 
+		ctx := context.Background()
 		inputRecord := source.Record{
 			Key:   []byte("input-key"),
 			Value: []byte("input-value"),
 			Headers: []source.RecordHeader{
 				{Key: "header-key", Value: []byte("header-value")},
 			},
+			Ctx: ctx,
 		}
 
 		mockModuleService.On("Process", mock.Anything, mock.Anything).Return(nil, errors.New("processing error"))
@@ -188,7 +190,8 @@ func TestNewWasmProcessor(t *testing.T) {
 	mockLoader := &loader.MockLoader{}
 	inputChannel := make(chan source.Record)
 
-	p := NewWasmProcessor(mockLoader, inputChannel)
+	p, err := NewWasmProcessor(mockLoader, inputChannel)
+	assert.NoError(t, err)
 	wp, ok := p.(*wasmProcessor)
 	assert.True(t, ok)
 	assert.Equal(t, mockLoader, wp.ldr)
