@@ -5,7 +5,7 @@ go 1.24.1
 require (
 	github.com/aws/aws-sdk-go-v2 v1.36.3
 	github.com/aws/aws-sdk-go-v2/config v1.29.14
-	github.com/aws/aws-sdk-go-v2/service/s3 v1.79.2
+	github.com/aws/aws-sdk-go-v2/service/s3 v1.80.0
 	github.com/aws/aws-sdk-go-v2/service/sqs v1.38.5
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/go-chi/chi/v5 v5.2.1
@@ -17,6 +17,7 @@ require (
 require (
 	github.com/google/uuid v1.6.0
 	github.com/stretchr/testify v1.10.0
+	go.opentelemetry.io/contrib/bridges/otelslog v0.10.0
 	go.opentelemetry.io/otel v1.35.0
 	go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc v0.11.0
 	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc v1.35.0
@@ -52,7 +53,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/internal/configsources v1.3.34 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.6.34 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/v4a v1.3.34 // indirect
-	github.com/aws/aws-sdk-go-v2/service/internal/checksum v1.7.0 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/checksum v1.7.2 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/s3shared v1.18.15 // indirect
 	github.com/aws/smithy-go v1.22.3 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
@@ -63,7 +64,6 @@ require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/stretchr/objx v0.5.2 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
-	go.opentelemetry.io/contrib/bridges/otelslog v0.10.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.35.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.5.0 // indirect
 	golang.org/x/crypto v0.37.0 // indirect
