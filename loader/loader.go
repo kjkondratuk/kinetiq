@@ -43,11 +43,21 @@ func (l *defaultPluginLoader) load(ctx context.Context, mutex *sync.Mutex, path 
 }
 
 type lazyReloader struct {
-	Loader
 	closeablePlugin
 	pluginLoader
 	mutex sync.Mutex
 	path  string
+
+	// resolve fetches the module artifact to path before it is loaded. It is nil
+	// for loaders whose artifact is already present on local disk.
+	//
+	// This is a function field rather than a method on an embedded type on
+	// purpose. Go selects methods at compile time by embedding depth, so a
+	// Resolve method declared on lazyReloader always shadows one declared on a
+	// type that embeds lazyReloader. Dispatching through an embedded interface
+	// does not change that, which previously left the S3 implementation
+	// unreachable.
+	resolve func(ctx context.Context) error
 }
 
 func newReloader(path string) lazyReloader {
@@ -64,9 +74,13 @@ type closeablePlugin interface {
 	v1.ModuleService
 }
 
-func (r *lazyReloader) Resolve(ctx context.Context) {
-	// empty because we don't need to resolve local files
-	slog.Info("Resolving local file")
+// resolveArtifact runs the configured resolver, if one is set.
+func (r *lazyReloader) resolveArtifact(ctx context.Context) error {
+	if r.resolve == nil {
+		slog.Info("Using local artifact", slog.String("path", r.path))
+		return nil
+	}
+	return r.resolve(ctx)
 }
 
 func (r *lazyReloader) Get(ctx context.Context) (v1.ModuleService, error) {
@@ -77,6 +91,10 @@ func (r *lazyReloader) Get(ctx context.Context) (v1.ModuleService, error) {
 		plugin = r.closeablePlugin
 		r.mutex.Unlock()
 	} else {
+		if err := r.resolveArtifact(ctx); err != nil {
+			return nil, fmt.Errorf("failed to resolve plugin artifact: %w", err)
+		}
+
 		var err error
 		plugin, err = r.load(ctx, &r.mutex, r.path)
 		if err != nil {
@@ -89,7 +107,11 @@ func (r *lazyReloader) Get(ctx context.Context) (v1.ModuleService, error) {
 }
 
 func (r *lazyReloader) Reload(ctx context.Context) error {
-	r.Resolve(ctx)
+	// Resolve before tearing anything down: if the new artifact cannot be
+	// fetched, keep serving the module that is already loaded.
+	if err := r.resolveArtifact(ctx); err != nil {
+		return fmt.Errorf("failed to resolve plugin artifact for reload: %w", err)
+	}
 
 	// Close existing plugin if loaded, since we're reloading
 	err := r.Close(ctx)
@@ -115,7 +137,6 @@ func (r *lazyReloader) Close(ctx context.Context) error {
 }
 
 type Loader interface {
-	Resolve(ctx context.Context)
 	Get(ctx context.Context) (v1.ModuleService, error)
 	Reload(ctx context.Context) error
 	Close(ctx context.Context) error

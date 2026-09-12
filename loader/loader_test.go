@@ -3,15 +3,37 @@ package loader
 import (
 	"context"
 	"errors"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"sync"
 	"testing"
 )
 
-func TestLazyReloader_Resolve(t *testing.T) {
-	// Ensure Resolve doesn't panic and runs correctly
-	reloader := lazyReloader{path: "dummy-path"}
-	reloader.Resolve(context.Background())
+func TestLazyReloader_resolveArtifact(t *testing.T) {
+	t.Run("no_resolver_is_a_noop", func(t *testing.T) {
+		// A local-file loader has nothing to fetch and must not error.
+		reloader := lazyReloader{path: "dummy-path"}
+		assert.NoError(t, reloader.resolveArtifact(context.Background()))
+	})
+
+	t.Run("configured_resolver_runs", func(t *testing.T) {
+		called := false
+		reloader := lazyReloader{path: "dummy-path", resolve: func(ctx context.Context) error {
+			called = true
+			return nil
+		}}
+
+		assert.NoError(t, reloader.resolveArtifact(context.Background()))
+		assert.True(t, called, "Configured resolver must be invoked")
+	})
+
+	t.Run("resolver_error_propagates", func(t *testing.T) {
+		reloader := lazyReloader{path: "dummy-path", resolve: func(ctx context.Context) error {
+			return errors.New("boom")
+		}}
+
+		assert.ErrorContains(t, reloader.resolveArtifact(context.Background()), "boom")
+	})
 }
 
 func TestLazyReloader_Get(t *testing.T) {

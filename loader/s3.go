@@ -2,6 +2,7 @@ package loader
 
 import (
 	"context"
+	"fmt"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"io"
 	"log/slog"
@@ -24,43 +25,39 @@ func NewS3Loader(s3Client S3Client, bucket string, pluginRef string) Loader {
 		bucket:       bucket,
 		lazyReloader: newReloader(pluginRef),
 	}
-	l.Loader = l
+	// Wire the download in as the reloader's resolver. Assigning a function here
+	// rather than relying on method promotion is what makes this reachable; see
+	// the comment on lazyReloader.resolve.
+	l.resolve = l.download
 	return l
 }
 
-func (l *s3Loader) Reload(ctx context.Context) error {
-	return l.lazyReloader.Reload(ctx)
-}
-
-func (l *s3Loader) Resolve(ctx context.Context) {
-	// Define a file to download to
+// download fetches the module artifact from S3 to the local path the loader
+// reads from. The object key and the local path are both pluginRef.
+func (l *s3Loader) download(ctx context.Context) error {
 	outFile, err := os.Create(l.path)
 	if err != nil {
-		slog.Error("failed to create file for S3 download", slog.String("err", err.Error()))
-		return
+		return fmt.Errorf("failed to create file %s for S3 download: %w", l.path, err)
 	}
 	defer outFile.Close()
 
-	// Reload the file
 	getObjectOutput, err := l.s3Client.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: &l.bucket,
 		Key:    &l.path,
 	})
 	if err != nil {
-		slog.Error("failed to download file from S3", slog.String("err", err.Error()))
-		return
+		return fmt.Errorf("failed to download %s from bucket %s: %w", l.path, l.bucket, err)
 	}
 	defer getObjectOutput.Body.Close()
 
-	// Write the data to the locally created file
-	_, err = io.Copy(outFile, getObjectOutput.Body)
-	if err != nil {
-		slog.Error("failed to write downloaded file to local disk", slog.String("err", err.Error()))
-		return
+	if _, err = io.Copy(outFile, getObjectOutput.Body); err != nil {
+		return fmt.Errorf("failed to write downloaded artifact to %s: %w", l.path, err)
 	}
 
 	slog.Info("Successfully downloaded artifact from bucket",
 		slog.String("path", l.path),
 		slog.String("bucket", l.bucket),
 	)
+
+	return nil
 }
