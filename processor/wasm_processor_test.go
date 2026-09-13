@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestWasmProcessor_Output(t *testing.T) {
@@ -50,7 +51,7 @@ func TestWasmProcessor_Start(t *testing.T) {
 		mockModuleService.On("Process", mock.Anything, mock.Anything).Return(expectedResponse, nil)
 		mockLoader.On("Get", mock.Anything).Return(mockModuleService, nil)
 
-		p, err := NewWasmProcessor(mockLoader, mockInputChannel)
+		p, err := NewWasmProcessor(mockLoader, mockInputChannel, nil)
 		assert.NoError(t, err)
 
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -86,7 +87,7 @@ func TestWasmProcessor_Start(t *testing.T) {
 		mockModuleService.On("Process", mock.Anything, mock.Anything).Return(nil, errors.New("processing error"))
 		mockLoader.On("Get", mock.Anything).Return(mockModuleService, nil)
 
-		p, err := NewWasmProcessor(mockLoader, mockInputChannel)
+		p, err := NewWasmProcessor(mockLoader, mockInputChannel, nil)
 		assert.NoError(t, err)
 
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -100,6 +101,112 @@ func TestWasmProcessor_Start(t *testing.T) {
 		case <-time.After(200 * time.Millisecond):
 			// No result emitted, expected behavior
 		}
+	})
+}
+
+func TestWasmProcessor_Start_UnblocksOnContextCancelDuringOutputSend(t *testing.T) {
+	mockModuleService := &v1.MockmoduleService{}
+	mockLoader := &loader.MockLoader{}
+	mockInputChannel := make(chan source.Record, 1)
+
+	ctx := context.Background()
+	inputRecord := source.Record{
+		Key:   []byte("input-key"),
+		Value: []byte("input-value"),
+		Headers: []source.RecordHeader{
+			{Key: "header-key", Value: []byte("header-value")},
+		},
+		Ctx: ctx,
+	}
+	mockInputChannel <- inputRecord
+
+	expectedResponse := &v1.ProcessResponse{
+		Key:   []byte("processed-key"),
+		Value: []byte("processed-value"),
+		Headers: []*v1.Headers{
+			{Key: "header-key", Value: []byte("header-value")},
+		},
+	}
+	mockModuleService.On("Process", mock.Anything, mock.Anything).Return(expectedResponse, nil)
+	mockLoader.On("Get", mock.Anything).Return(mockModuleService, nil)
+
+	p, err := NewWasmProcessor(mockLoader, mockInputChannel, nil)
+	require.NoError(t, err)
+
+	startCtx, cancel := context.WithCancel(context.Background())
+
+	done := make(chan struct{})
+	go func() {
+		p.Start(startCtx)
+		close(done)
+	}()
+
+	// Give Start time to process the record and block attempting to send
+	// the result on the (unbuffered, undrained) output channel. Nothing
+	// ever reads from p.Output() in this test.
+	time.Sleep(100 * time.Millisecond)
+
+	cancel()
+
+	select {
+	case <-done:
+		// Start returned as expected once the context was cancelled.
+	case <-time.After(2 * time.Second):
+		t.Fatal("Start did not return after context cancellation while blocked sending output")
+	}
+}
+
+func TestWasmProcessor_CloseAfterContextCancelDoesNotPanic(t *testing.T) {
+	mockModuleService := &v1.MockmoduleService{}
+	mockLoader := &loader.MockLoader{}
+	mockInputChannel := make(chan source.Record, 1)
+
+	ctx := context.Background()
+	inputRecord := source.Record{
+		Key:   []byte("input-key"),
+		Value: []byte("input-value"),
+		Headers: []source.RecordHeader{
+			{Key: "header-key", Value: []byte("header-value")},
+		},
+		Ctx: ctx,
+	}
+	mockInputChannel <- inputRecord
+
+	expectedResponse := &v1.ProcessResponse{
+		Key:   []byte("processed-key"),
+		Value: []byte("processed-value"),
+		Headers: []*v1.Headers{
+			{Key: "header-key", Value: []byte("header-value")},
+		},
+	}
+	mockModuleService.On("Process", mock.Anything, mock.Anything).Return(expectedResponse, nil)
+	mockLoader.On("Get", mock.Anything).Return(mockModuleService, nil)
+
+	p, err := NewWasmProcessor(mockLoader, mockInputChannel, nil)
+	require.NoError(t, err)
+
+	startCtx, cancel := context.WithCancel(context.Background())
+
+	done := make(chan struct{})
+	go func() {
+		p.Start(startCtx)
+		close(done)
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Start did not return after context cancellation")
+	}
+
+	// Close() must not panic even though Start was blocked on the output
+	// send when the context was cancelled.
+	assert.NotPanics(t, func() {
+		p.Close()
 	})
 }
 
@@ -190,11 +297,67 @@ func TestNewWasmProcessor(t *testing.T) {
 	mockLoader := &loader.MockLoader{}
 	inputChannel := make(chan source.Record)
 
-	p, err := NewWasmProcessor(mockLoader, inputChannel)
+	p, err := NewWasmProcessor(mockLoader, inputChannel, nil)
 	assert.NoError(t, err)
 	wp, ok := p.(*wasmProcessor)
 	assert.True(t, ok)
 	assert.Equal(t, mockLoader, wp.ldr)
 	assert.EqualValues(t, inputChannel, wp.input)
 	assert.NotNil(t, wp.output)
+}
+
+func TestWasmProcessor_Reload(t *testing.T) {
+	t.Run("reload_signal_triggers_loader_reload", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		mockLoader := &loader.MockLoader{}
+		reloaded := make(chan struct{}, 1)
+		mockLoader.On("Reload", mock.Anything).Run(func(args mock.Arguments) {
+			reloaded <- struct{}{}
+		}).Return(nil)
+
+		in := make(chan source.Record)
+		reloadCh := make(chan struct{}, 1)
+		p, err := NewWasmProcessor(mockLoader, in, reloadCh)
+		require.NoError(t, err)
+
+		go p.Start(ctx)
+
+		reloadCh <- struct{}{}
+
+		select {
+		case <-reloaded:
+		case <-time.After(2 * time.Second):
+			t.Fatal("processor did not reload on signal")
+		}
+		mockLoader.AssertExpectations(t)
+	})
+
+	t.Run("failed_reload_does_not_stop_the_processor", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		mockLoader := &loader.MockLoader{}
+		mockLoader.On("Reload", mock.Anything).Return(errors.New("bad module"))
+		// The record below gets consumed and processed asynchronously after
+		// this subtest's assertion already succeeded; stub Get (optionally)
+		// so that unrelated background processing doesn't panic the mock.
+		mockLoader.On("Get", mock.Anything).Return(nil, errors.New("no module")).Maybe()
+
+		in := make(chan source.Record)
+		reloadCh := make(chan struct{}, 1)
+		p, err := NewWasmProcessor(mockLoader, in, reloadCh)
+		require.NoError(t, err)
+
+		go p.Start(ctx)
+		reloadCh <- struct{}{}
+
+		// The processor must still be consuming input after a failed reload.
+		select {
+		case in <- source.Record{Ctx: ctx, Key: []byte("k"), Value: []byte("v")}:
+		case <-time.After(2 * time.Second):
+			t.Fatal("processor stopped consuming after a failed reload")
+		}
+	})
 }

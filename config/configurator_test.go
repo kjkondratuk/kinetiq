@@ -124,6 +124,34 @@ func TestConfigurator_Configure(t *testing.T) {
 	}
 }
 
+func TestConfigurator_Configure_DefaultConsumerGroup(t *testing.T) {
+	// With no KAFKA_CONSUMER_GROUP set, kinetiq must consume as part of a
+	// group (not grouplessly) so that offsets can be committed and records
+	// redelivered after a restart.
+	env := map[string]string{
+		"PLUGIN_REF":         "plugin",
+		"KAFKA_SOURCE_TOPIC": "source_topic",
+		"KAFKA_DEST_TOPIC":   "dest_topic",
+	}
+	for k, v := range env {
+		_ = os.Setenv(k, v)
+	}
+	defer func() {
+		for k := range env {
+			_ = os.Unsetenv(k)
+		}
+	}()
+
+	c := configurator{}
+	conf, err := c.Configure(t.Context())
+	if err != nil {
+		t.Fatalf("Configure() unexpected error = %v", err)
+	}
+	if conf.Kafka.Consumer.Group != "kinetiq" {
+		t.Errorf("expected default consumer group %q, got %q", "kinetiq", conf.Kafka.Consumer.Group)
+	}
+}
+
 func TestGetEnvOrDefault(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -215,12 +243,12 @@ func TestGetEnvOrDefault(t *testing.T) {
 
 func TestRequire(t *testing.T) {
 	tests := []struct {
-		name    string
-		key     string
+		name     string
+		key      string
 		envValue string
-		err     error
-		want    string
-		wantErr bool
+		err      error
+		want     string
+		wantErr  bool
 	}{
 		{
 			name:     "value exists",
@@ -467,13 +495,13 @@ func TestCreateKafkaClientOptions(t *testing.T) {
 	awsConfig := &aws.Config{}
 
 	tests := []struct {
-		name     string
-		conf     SharedKafkaConfig
+		name       string
+		conf       SharedKafkaConfig
 		clientName string
-		awsConf  *aws.Config
-		envSetup func()
+		awsConf    *aws.Config
+		envSetup   func()
 		envCleanup func()
-		checkOpts func(t *testing.T, opts []kgo.Opt)
+		checkOpts  func(t *testing.T, opts []kgo.Opt)
 	}{
 		{
 			name: "plain SASL mechanism",
@@ -606,11 +634,11 @@ func TestProducerConfig(t *testing.T) {
 	c := configurator{}
 
 	tests := []struct {
-		name     string
-		conf     Config
-		envSetup func()
+		name       string
+		conf       Config
+		envSetup   func()
 		envCleanup func()
-		checkOpts func(t *testing.T, opts []kgo.Opt)
+		checkOpts  func(t *testing.T, opts []kgo.Opt)
 	}{
 		{
 			name: "basic producer config",
@@ -652,7 +680,7 @@ func TestProducerConfig(t *testing.T) {
 					DestTopic:   "test-topic",
 					Producer: ProducerConfig{
 						SharedKafkaConfig: SharedKafkaConfig{},
-						Compression:        "gzip",
+						Compression:       "gzip",
 					},
 				},
 			},
@@ -673,7 +701,7 @@ func TestProducerConfig(t *testing.T) {
 					DestTopic:   "test-topic",
 					Producer: ProducerConfig{
 						SharedKafkaConfig: SharedKafkaConfig{},
-						Partitioner:        "round-robin",
+						Partitioner:       "round-robin",
 					},
 				},
 			},
@@ -694,7 +722,7 @@ func TestProducerConfig(t *testing.T) {
 					DestTopic:   "test-topic",
 					Producer: ProducerConfig{
 						SharedKafkaConfig: SharedKafkaConfig{},
-						RequiredAcks:       "all",
+						RequiredAcks:      "all",
 					},
 				},
 			},
@@ -750,11 +778,11 @@ func TestConsumerConfig(t *testing.T) {
 	c := configurator{}
 
 	tests := []struct {
-		name     string
-		conf     Config
-		envSetup func()
+		name       string
+		conf       Config
+		envSetup   func()
 		envCleanup func()
-		checkOpts func(t *testing.T, opts []kgo.Opt)
+		checkOpts  func(t *testing.T, opts []kgo.Opt)
 	}{
 		{
 			name: "basic consumer config",
@@ -790,7 +818,7 @@ func TestConsumerConfig(t *testing.T) {
 					SourceTopic:   "source-topic",
 					Consumer: ConsumerConfig{
 						SharedKafkaConfig: SharedKafkaConfig{},
-						Topics: []string{"topic1", "topic2"},
+						Topics:            []string{"topic1", "topic2"},
 					},
 				},
 			},
@@ -811,7 +839,7 @@ func TestConsumerConfig(t *testing.T) {
 					SourceTopic:   "source-topic",
 					Consumer: ConsumerConfig{
 						SharedKafkaConfig: SharedKafkaConfig{},
-						Group: "test-group",
+						Group:             "test-group",
 					},
 				},
 			},
@@ -832,7 +860,7 @@ func TestConsumerConfig(t *testing.T) {
 					SourceTopic:   "source-topic",
 					Consumer: ConsumerConfig{
 						SharedKafkaConfig: SharedKafkaConfig{},
-						Offset: "start",
+						Offset:            "start",
 					},
 				},
 			},
@@ -853,7 +881,7 @@ func TestConsumerConfig(t *testing.T) {
 					SourceTopic:   "source-topic",
 					Consumer: ConsumerConfig{
 						SharedKafkaConfig: SharedKafkaConfig{},
-						Offset: "end",
+						Offset:            "end",
 					},
 				},
 			},
@@ -874,7 +902,7 @@ func TestConsumerConfig(t *testing.T) {
 					SourceTopic:   "source-topic",
 					Consumer: ConsumerConfig{
 						SharedKafkaConfig: SharedKafkaConfig{},
-						Offset: "100",
+						Offset:            "100",
 					},
 				},
 			},

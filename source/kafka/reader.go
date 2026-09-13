@@ -125,6 +125,7 @@ func (r *kafkaReader) Read(ctx context.Context) {
 					Key:     record.Key,
 					Value:   record.Value,
 					Ctx:     recordCtx,
+					Src:     record,
 				}
 
 				// Add attributes to the span

@@ -1,10 +1,8 @@
 package detection
 
 import (
-	"context"
 	"errors"
 	"github.com/fsnotify/fsnotify"
-	"github.com/kjkondratuk/kinetiq/loader"
 	"testing"
 	"time"
 
@@ -86,124 +84,52 @@ func Test_listener_Listen(t *testing.T) {
 	}
 }
 
-func TestFilesystemNotificationPluginReloadResponder(t *testing.T) {
-	type constructArgs struct {
-		ctx context.Context
-		dl  func() *loader.MockLoader
-	}
-	type callArgs struct {
-		event *fsnotify.Event
-		err   error
-	}
-	tests := []struct {
-		name          string
-		constructArgs constructArgs
-		callArgs      callArgs
-		validate      func(t *testing.T, mockLoader *loader.MockLoader)
-	}{
-		{
-			"should handle error from event source",
-			constructArgs{
-				ctx: t.Context(),
-				dl: func() *loader.MockLoader {
-					ldr := &loader.MockLoader{}
-					return ldr
-				},
-			},
-			callArgs{
-				event: nil,
-				err:   errors.New("something went wrong"),
-			},
-			func(t *testing.T, mockLoader *loader.MockLoader) {
-				mockLoader.AssertNotCalled(t, "Get", mock.Anything)
-			},
-		}, {
-			"should handle non-write non-create events",
-			constructArgs{
-				ctx: t.Context(),
-				dl: func() *loader.MockLoader {
-					ldr := &loader.MockLoader{}
-					return ldr
-				},
-			},
-			callArgs{
-				event: &fsnotify.Event{
-					Name: "some_file",
-					Op:   fsnotify.Remove,
-				},
-				err: nil,
-			},
-			func(t *testing.T, mockLoader *loader.MockLoader) {
-				mockLoader.AssertNotCalled(t, "Get", mock.Anything)
-			},
-		}, {
-			"should handle errors reloading gracefully",
-			constructArgs{
-				ctx: t.Context(),
-				dl: func() *loader.MockLoader {
-					ldr := &loader.MockLoader{}
-					ldr.On("Reload", mock.Anything).Return(errors.New("something bad happened"))
-					return ldr
-				},
-			},
-			callArgs{
-				event: &fsnotify.Event{
-					Name: "some_file",
-					Op:   fsnotify.Create,
-				},
-				err: nil,
-			},
-			func(t *testing.T, mockLoader *loader.MockLoader) {
-				mockLoader.AssertCalled(t, "Reload", mock.Anything)
-			},
-		}, {
-			"should handle successful reloading for create events",
-			constructArgs{
-				ctx: t.Context(),
-				dl: func() *loader.MockLoader {
-					ldr := &loader.MockLoader{}
-					ldr.On("Reload", mock.Anything).Return(nil)
-					return ldr
-				},
-			},
-			callArgs{
-				event: &fsnotify.Event{
-					Name: "some_file",
-					Op:   fsnotify.Create,
-				},
-				err: nil,
-			},
-			func(t *testing.T, mockLoader *loader.MockLoader) {
-				mockLoader.AssertCalled(t, "Reload", mock.Anything)
-			},
-		}, {
-			"should handle successful reloading for write events",
-			constructArgs{
-				ctx: t.Context(),
-				dl: func() *loader.MockLoader {
-					ldr := &loader.MockLoader{}
-					ldr.On("Reload", mock.Anything).Return(nil)
-					return ldr
-				},
-			},
-			callArgs{
-				event: &fsnotify.Event{
-					Name: "some_file",
-					Op:   fsnotify.Write,
-				},
-				err: nil,
-			},
-			func(t *testing.T, mockLoader *loader.MockLoader) {
-				mockLoader.AssertCalled(t, "Reload", mock.Anything)
-			},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ldr := tt.constructArgs.dl()
-			responder := FilesystemNotificationPluginReloadResponder(tt.constructArgs.ctx, ldr)
-			responder(tt.callArgs.event, tt.callArgs.err)
-			tt.validate(t, ldr)
-		})
-	}
+func TestFilesystemNotificationReloadSignaller(t *testing.T) {
+	t.Run("burst_of_events_yields_one_signal", func(t *testing.T) {
+		reloadCh := make(chan struct{}, 1)
+		responder := FilesystemNotificationReloadSignaller(reloadCh, 50*time.Millisecond)
+
+		// One `go build` emits several Write/Create events in quick succession.
+		for i := 0; i < 5; i++ {
+			responder(&fsnotify.Event{Name: "mod.wasm", Op: fsnotify.Write}, nil)
+		}
+
+		select {
+		case <-reloadCh:
+		case <-time.After(time.Second):
+			t.Fatal("expected exactly one reload signal, got none")
+		}
+
+		select {
+		case <-reloadCh:
+			t.Fatal("burst must collapse to a single signal")
+		case <-time.After(200 * time.Millisecond):
+		}
+	})
+
+	t.Run("ignores_non_write_ops", func(t *testing.T) {
+		reloadCh := make(chan struct{}, 1)
+		responder := FilesystemNotificationReloadSignaller(reloadCh, 50*time.Millisecond)
+
+		responder(&fsnotify.Event{Name: "mod.wasm", Op: fsnotify.Chmod}, nil)
+
+		select {
+		case <-reloadCh:
+			t.Fatal("Chmod must not trigger a reload")
+		case <-time.After(200 * time.Millisecond):
+		}
+	})
+
+	t.Run("watcher_error_does_not_signal", func(t *testing.T) {
+		reloadCh := make(chan struct{}, 1)
+		responder := FilesystemNotificationReloadSignaller(reloadCh, 50*time.Millisecond)
+
+		responder(nil, errors.New("watch failure"))
+
+		select {
+		case <-reloadCh:
+			t.Fatal("an error must not trigger a reload")
+		case <-time.After(200 * time.Millisecond):
+		}
+	})
 }

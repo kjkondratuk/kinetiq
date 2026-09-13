@@ -90,8 +90,12 @@ func main() {
 
 	log.Print("Reader configured...")
 
+	// Buffered by one so a change detected while a reload is in progress is
+	// coalesced into a single follow-up swap.
+	reloadCh := make(chan struct{}, 1)
+
 	// Create WASM processor with instrumentation
-	proc, err := processor.NewWasmProcessor(dl, reader.Output())
+	proc, err := processor.NewWasmProcessor(dl, reader.Output(), reloadCh)
 	if err != nil {
 		slog.Error("Failed to create wasm processor", "error", err)
 		os.Exit(1)
@@ -116,7 +120,9 @@ func main() {
 	log.Print("Writer client configured...")
 
 	// Create Kafka writer with instrumentation
-	writer, err := sink_kafka.NewKafkaWriter(writerClient, proc.Output())
+	// readerClient (the consumer) is passed as the marker, not writerClient: only
+	// the consumer can commit its own offsets via MarkCommitRecords.
+	writer, err := sink_kafka.NewKafkaWriter(writerClient, proc.Output(), readerClient)
 	if err != nil {
 		slog.Error("Failed to create kafka writer", "error", err)
 		os.Exit(1)
@@ -163,7 +169,7 @@ func main() {
 		go watcher.StartEvents(baseCtx)
 
 		// Listen to events and process them
-		go watcher.Listen(baseCtx, detection.S3NotificationPluginReloadResponder(baseCtx, appCfg.PluginRef, appCfg.S3.Bucket, dl))
+		go watcher.Listen(baseCtx, detection.S3NotificationPluginReloadResponder(appCfg.PluginRef, appCfg.S3.Bucket, reloadCh))
 	} else {
 		// listen for changes from local file listener
 		w, err := fsnotify.NewWatcher()
@@ -184,7 +190,7 @@ func main() {
 
 		watcher := detection.NewListener[fsnotify.Event](detection.NewWatcher(w.Events, w.Errors))
 
-		go watcher.Listen(baseCtx, detection.FilesystemNotificationPluginReloadResponder(baseCtx, dl))
+		go watcher.Listen(baseCtx, detection.FilesystemNotificationReloadSignaller(reloadCh, detection.DefaultReloadDebounce))
 	}
 
 	httpCtx, hc := context.WithCancel(baseCtx)

@@ -15,6 +15,7 @@ import (
 
 type kafkaWriter struct {
 	client  KafkaClient
+	marker  RecordMarker
 	enabled atomic.Bool
 	input   <-chan processor.Result
 
@@ -30,7 +31,15 @@ type KafkaClient interface {
 	Close()
 }
 
-func NewKafkaWriter(client KafkaClient, input <-chan processor.Result) (sink.Sink, error) {
+// RecordMarker marks source records as safe to commit. Only the consumer client
+// can commit, so the writer marks through this indirection rather than holding a
+// client of its own. The method name matches *kgo.Client.MarkCommitRecords so the
+// reader's client satisfies this interface directly.
+type RecordMarker interface {
+	MarkCommitRecords(recs ...*kgo.Record)
+}
+
+func NewKafkaWriter(client KafkaClient, input <-chan processor.Result, marker RecordMarker) (sink.Sink, error) {
 	// Create instrumentation
 	instr := otel.NewInstrumentation("kafka_writer")
 
@@ -61,6 +70,7 @@ func NewKafkaWriter(client KafkaClient, input <-chan processor.Result) (sink.Sin
 
 	w := &kafkaWriter{
 		client:                  client,
+		marker:                  marker,
 		input:                   input,
 		instr:                   instr,
 		recordsWrittenCounter:   recordsWrittenCounter,
@@ -110,11 +120,18 @@ func (w *kafkaWriter) Write(ctx context.Context) {
 				}
 			}
 
+			// Await the produce before taking the next result. This keeps the
+			// pipeline strictly sequential, which is what makes marking safe:
+			// MarkCommitRecords advances the highest offset per partition, so an
+			// out-of-order ack could otherwise commit past an unwritten record.
+			done := make(chan struct{})
 			w.client.Produce(writeCtx, &kgo.Record{
 				Key:     input.Key,
 				Value:   input.Value,
 				Headers: headers,
 			}, func(record *kgo.Record, err error) {
+				defer close(done)
+
 				if err != nil {
 					// Record the error
 					w.instr.RecordError(writeSpan, err)
@@ -123,12 +140,22 @@ func (w *kafkaWriter) Write(ctx context.Context) {
 				} else {
 					// Record successful write
 					w.recordsWrittenCounter.Add(writeCtx, 1)
+					// Only a written record may be committed.
+					if w.marker != nil && input.Src != nil {
+						w.marker.MarkCommitRecords(input.Src)
+					}
 				}
 
 				// End the span and stop measuring
 				writeSpan.End()
 				stopMeasure()
 			})
+
+			select {
+			case <-done:
+			case <-ctx.Done():
+				return
+			}
 		}
 	}
 }

@@ -17,8 +17,12 @@ exporters:
         tls:
             insecure: true
         timeout: 10s
-    loki:
-        endpoint: "http://loki:3100/loki/api/v1/push"
+    # The contrib `loki` exporter was removed upstream; Loki 3.x ingests OTLP
+    # natively at /otlp, to which otlphttp appends /v1/logs.
+    otlphttp/loki:
+        endpoint: "http://loki:3100/otlp"
+        tls:
+            insecure: true
 
 extensions:
     health_check:
@@ -39,4 +43,4 @@ service:
         logs:
             receivers: [otlp]
             processors: [batch]
-            exporters: [debug, loki]
+            exporters: [debug, otlphttp/loki]

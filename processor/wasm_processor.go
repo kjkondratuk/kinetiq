@@ -13,9 +13,10 @@ import (
 )
 
 type wasmProcessor struct {
-	ldr    loader.Loader
-	input  <-chan source.Record
-	output chan Result
+	ldr      loader.Loader
+	input    <-chan source.Record
+	output   chan Result
+	reloadCh <-chan struct{}
 
 	// Instrumentation
 	instr                   *otel.Instrumentation
@@ -25,7 +26,7 @@ type wasmProcessor struct {
 }
 
 // NewWasmProcessor creates a new WASM processor with OpenTelemetry instrumentation
-func NewWasmProcessor(ldr loader.Loader, channel <-chan source.Record) (Processor, error) {
+func NewWasmProcessor(ldr loader.Loader, channel <-chan source.Record, reloadCh <-chan struct{}) (Processor, error) {
 	// Create instrumentation
 	instr := otel.NewInstrumentation("wasm_processor")
 
@@ -58,6 +59,7 @@ func NewWasmProcessor(ldr loader.Loader, channel <-chan source.Record) (Processo
 		ldr:                     ldr,
 		input:                   channel,
 		output:                  make(chan Result),
+		reloadCh:                reloadCh,
 		instr:                   instr,
 		processingTimeHistogram: processingTimeHistogram,
 		recordsProcessedCounter: recordsProcessedCounter,
@@ -82,6 +84,13 @@ func (p *wasmProcessor) Start(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-p.reloadCh:
+			// Runs between records, so no module is in use right now. The
+			// loader swaps atomically; on failure the previous module keeps
+			// serving and ingestion continues uninterrupted.
+			if err := p.ldr.Reload(ctx); err != nil {
+				slog.Error("module reload failed; continuing with previous module", "error", err)
+			}
 		case record, ok := <-p.input:
 			if !ok {
 				return
@@ -121,7 +130,15 @@ func (p *wasmProcessor) Start(ctx context.Context) {
 				attribute.Int("result.headers.count", len(process.Headers)),
 			)
 
-			p.output <- process
+			select {
+			case p.output <- process:
+			case <-ctx.Done():
+				// Unblock on shutdown: Close() closes p.output, and a send
+				// blocked at that moment would panic.
+				processSpan.End()
+				stopMeasure()
+				return
+			}
 
 			// End the span and stop measuring
 			processSpan.End()
@@ -169,6 +186,7 @@ func (p *wasmProcessor) process(ctx context.Context, record source.Record) (Resu
 		Value:   res.Value,
 		Headers: hdr,
 		Ctx:     ctx,
+		Src:     record.Src,
 	}, nil
 }
 

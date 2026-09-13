@@ -21,8 +21,11 @@ build: gen-proto
 build-test-module:
 	GOOS=wasip1 GOARCH=wasm $(GO) build -buildmode=c-shared -o examples/$(MOD_ROOT)/$(MODULE) examples/$(MODULE_SRC)
 
+# build-test-module already writes to the path the running process watches, so
+# the rebuild itself is what triggers the filesystem reload. The previous `mv`
+# moved the file onto itself and did nothing.
 hotswap-module-local: build-test-module
-	mv examples/$(MOD_ROOT)/$(MODULE) examples/test_module/test_module.wasm
+	@echo "Rebuilt $(MODULE) in place -- the running process should reload it."
 
 hotswap-s3: build-test-module
 	aws s3 cp examples/$(MOD_ROOT)/test_module.wasm s3://$(BUCKET)/test_module.wasm
@@ -45,7 +48,7 @@ stop-kafka:
 	$(DOCKER) compose down
 
 run-test-module-local:
-	make run-test-module ENV="PLUGIN_REF=./examples/module/$(MODULE) KAFKA_SOURCE_TOPIC=$(SOURCE_TOPIC) KAFKA_DEST_TOPIC=$(DEST_TOPIC)"
+	make run-test-module ENV="PLUGIN_REF=./examples/$(MOD_ROOT)/$(MODULE) KAFKA_SOURCE_TOPIC=$(SOURCE_TOPIC) KAFKA_DEST_TOPIC=$(DEST_TOPIC)"
 
 run-test-module-s3:
 	make run-test-module ENV="S3_INTEGRATION_ENABLED=true PLUGIN_REF=$(MODULE) KAFKA_SOURCE_TOPIC=$(SOURCE_TOPIC) KAFKA_DEST_TOPIC=$(DEST_TOPIC) S3_INTEGRATION_BUCKET=$(BUCKET) S3_INTEGRATION_CHANGE_QUEUE=$(CHANGE_QUEUE)"

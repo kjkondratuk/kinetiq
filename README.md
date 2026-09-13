@@ -2,6 +2,67 @@
 
 A web-assembly extensible, composable, kafka processor that supports hot-reloading.
 
+# Quickstart
+
+Brings up Kafka, kinetiq, and a producer that emits a message every 300ms, so you can
+watch records flow through a WASM module without writing any client code.
+
+**Prerequisites:** Go 1.24+, Docker, and a running Docker daemon.
+
+```bash
+# 1. Build the example WASM module.
+#    Required: the .wasm artifact is gitignored, and compose bind-mounts it.
+#    Skipping this leaves Docker mounting a directory where a file should be.
+make build-test-module
+
+# 2. Start everything.
+docker compose --profile all up
+```
+
+Once it is up:
+
+| What | Where |
+| --- | --- |
+| Messages on both topics | Kafka UI at [localhost:10015](http://localhost:10015) |
+| Traces | Jaeger at [localhost:16686](http://localhost:16686) |
+| Metrics and logs | Grafana at [localhost:41000](http://localhost:41000) |
+| kinetiq health | `curl localhost:8080/health` |
+
+The example module echoes each message and logs it, so `kinetiq-test-topic-out` should
+mirror `kinetiq-test-topic`.
+
+Use `--profile minimal` instead of `--profile all` for just Kafka, kinetiq, and the
+producer, with no observability stack.
+
+## Trying hot reload
+
+Hot reload is easiest to see when kinetiq runs on the host rather than in a container,
+because it watches the module file directly.
+
+```bash
+# Terminal 1 - Kafka only
+make start-kafka && make create-topics
+
+# Terminal 2 - kinetiq on the host
+make run-test-module-local
+
+# Terminal 3 - edit examples/test_module.go, then rebuild in place
+make hotswap-module-local
+```
+
+The rebuild writes to the file kinetiq is watching, which triggers a reload. Watch
+terminal 2 for the new module taking over without a restart.
+
+To load modules from S3 instead of local disk, set `S3_INTEGRATION_ENABLED=true` along
+with `S3_INTEGRATION_BUCKET` and `S3_INTEGRATION_CHANGE_QUEUE`, then publish with
+`make hotswap-s3`. kinetiq downloads the object on startup and again whenever the change
+queue reports a new version.
+
+Note that `PLUGIN_REF` means something different in this mode: it's the S3 object key
+(e.g. `test_module.wasm`), not a local path like `./examples/test_module/test_module.wasm`
+in filesystem mode. The same value also doubles as the local path kinetiq downloads the
+object to, so it still needs to be a valid relative filename.
+
 # Overview
 
 Developing Kafka applications in a polyglot microservice architecture can be time consuming.  You spend time building,
@@ -37,7 +98,7 @@ different sources/sinks, data formats, and messaging providers.
 This project is very much a work-in-progress currently, but you can track the progress of a viable release on the
 [milestones page](https://github.com/kjkondratuk/kinetiq/milestones)!
 
-1. Message processing will be briefly delayed during module reloading to avoid data loss
+1. Ingest is not paused during a module reload. `Source.Enable`/`Disable` exist for this but are not yet wired up, so a message already in flight can fail against a runtime that is being swapped. A failed *fetch* is safe -- the running module is left in place -- but a failed *load* leaves the loader without a usable module until restart
 2. Only works currently with Kafka inputs and outputs
 3. Requires web assembly modules to be loadable by [wazero](https://wazero.io/) runtime
 4. Only supports module change detection for S3 and local files currently

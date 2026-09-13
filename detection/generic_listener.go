@@ -3,8 +3,9 @@ package detection
 import (
 	"context"
 	"github.com/fsnotify/fsnotify"
-	"github.com/kjkondratuk/kinetiq/loader"
 	"log"
+	"sync"
+	"time"
 )
 
 type listener[T Detectable] struct {
@@ -15,20 +16,47 @@ func NewListener[T Detectable](watcher Watcher[T]) Listener[T] {
 	return &listener[T]{watcher: watcher}
 }
 
-func FilesystemNotificationPluginReloadResponder(ctx context.Context, dl loader.Loader) Responder[fsnotify.Event] {
+// DefaultReloadDebounce is how long the watcher waits for filesystem activity to
+// settle before signalling a reload. A single `go build` emits several
+// Write/Create events; without this, each one would trigger a separate swap.
+const DefaultReloadDebounce = 300 * time.Millisecond
+
+// FilesystemNotificationReloadSignaller reports module changes by signalling
+// reloadCh rather than reloading directly. The processor owns the actual swap so
+// it can run between records, when no module is in use.
+func FilesystemNotificationReloadSignaller(reloadCh chan<- struct{}, debounce time.Duration) Responder[fsnotify.Event] {
+	var mu sync.Mutex
+	var timer *time.Timer
+
 	return func(notification *fsnotify.Event, err error) {
 		if err != nil {
 			log.Printf("Failed to handle file watcher changes: %s", err)
 			return
 		}
-		if notification.Op.Has(fsnotify.Write) || notification.Op.Has(fsnotify.Create) {
-			log.Printf("Detected change in %s", notification.Name)
-			err = dl.Reload(ctx)
-			if err != nil {
-				log.Printf("Failed to reload plugin: %s", err)
-				return
-			}
+		if notification == nil {
+			return
 		}
+		if !notification.Op.Has(fsnotify.Write) && !notification.Op.Has(fsnotify.Create) {
+			return
+		}
+
+		name := notification.Name
+
+		mu.Lock()
+		defer mu.Unlock()
+		if timer != nil {
+			timer.Stop()
+		}
+		timer = time.AfterFunc(debounce, func() {
+			log.Printf("Detected change in %s", name)
+
+			// Non-blocking: if a reload is already pending, this change is
+			// covered by it.
+			select {
+			case reloadCh <- struct{}{}:
+			default:
+			}
+		})
 	}
 }
 
