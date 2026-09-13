@@ -7,7 +7,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
-	"github.com/kjkondratuk/kinetiq/loader"
 	"log"
 	"log/slog"
 	"time"
@@ -35,8 +34,11 @@ type SqsWatcher interface {
 var _ Listener[S3EventNotification] = &sqsWatcher{} // ensure sqsWatcher is an S3EventNotification listener
 var _ Watcher[S3EventNotification] = &sqsWatcher{}  // ensure sqsWatcher is an S3EventNotification watcher
 
-func S3NotificationPluginReloadResponder(ctx context.Context, pluginRef string, bucket string,
-	dl loader.Loader) Responder[S3EventNotification] {
+// S3NotificationPluginReloadResponder reports matching S3 change events by
+// signalling reloadCh rather than reloading directly. The processor owns the
+// actual swap so it can run between records, when no module is in use.
+func S3NotificationPluginReloadResponder(pluginRef string, bucket string,
+	reloadCh chan<- struct{}) Responder[S3EventNotification] {
 
 	return func(event *S3EventNotification, err error) {
 		if err != nil {
@@ -48,12 +50,12 @@ func S3NotificationPluginReloadResponder(ctx context.Context, pluginRef string, 
 				record.S3.Bucket.Name == bucket &&
 				record.EventName == "ObjectCreated:Put" {
 
-				// install new processor
-				log.Printf("Loading new module: %s", record.S3.Object.ETag)
-				err = dl.Reload(ctx)
-				if err != nil {
-					log.Printf("Failed to reload module: %s", err)
-					return
+				log.Printf("Detected new module: %s", record.S3.Object.ETag)
+				// Non-blocking: if a reload is already pending, this change is
+				// covered by it.
+				select {
+				case reloadCh <- struct{}{}:
+				default:
 				}
 			}
 		}
