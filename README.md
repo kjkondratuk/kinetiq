@@ -58,6 +58,11 @@ with `S3_INTEGRATION_BUCKET` and `S3_INTEGRATION_CHANGE_QUEUE`, then publish wit
 `make hotswap-s3`. kinetiq downloads the object on startup and again whenever the change
 queue reports a new version.
 
+Note that `PLUGIN_REF` means something different in this mode: it's the S3 object key
+(e.g. `test_module.wasm`), not a local path like `./examples/test_module/test_module.wasm`
+in filesystem mode. The same value also doubles as the local path kinetiq downloads the
+object to, so it still needs to be a valid relative filename.
+
 # Overview
 
 Developing Kafka applications in a polyglot microservice architecture can be time consuming.  You spend time building,
