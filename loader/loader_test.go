@@ -94,75 +94,6 @@ func TestLazyReloader_Get(t *testing.T) {
 	})
 }
 
-func TestLazyReloader_Reload(t *testing.T) {
-	t.Run("successful_reload", func(t *testing.T) {
-		ctx := t.Context()
-		mockCloseablePlugin := &MockcloseablePlugin{}
-		mockLoader := &MockpluginLoader{}
-
-		reloader := lazyReloader{
-			path:            "dummy-path",
-			closeablePlugin: mockCloseablePlugin,
-			pluginLoader:    mockLoader,
-			mutex:           sync.Mutex{},
-		}
-
-		mockCloseablePlugin.On("Close", ctx).Return(nil)
-		newMockPlugin := &MockcloseablePlugin{}
-		mockLoader.On("load", ctx, mock.Anything, "dummy-path").Return(newMockPlugin, nil)
-
-		err := reloader.Reload(ctx)
-		if err != nil {
-			t.Fatalf("expected no error, got %v", err)
-		}
-
-		if reloader.closeablePlugin != newMockPlugin {
-			t.Fatalf("expected closeablePlugin to be %v, got %v", newMockPlugin, reloader.closeablePlugin)
-		}
-
-		mockCloseablePlugin.AssertExpectations(t)
-		mockLoader.AssertExpectations(t)
-	})
-
-	t.Run("failure_on_close", func(t *testing.T) {
-		ctx := t.Context()
-		mockCloseablePlugin := &MockcloseablePlugin{}
-		reloader := lazyReloader{
-			path:            "dummy-path",
-			closeablePlugin: mockCloseablePlugin,
-			mutex:           sync.Mutex{},
-		}
-
-		mockCloseablePlugin.On("Close", ctx).Return(errors.New("close error"))
-
-		err := reloader.Reload(ctx)
-		if err == nil {
-			t.Fatalf("expected error, got nil")
-		}
-	})
-
-	t.Run("failure_on_load", func(t *testing.T) {
-		ctx := t.Context()
-		mockCloseablePlugin := &MockcloseablePlugin{}
-		mockLoader := &MockpluginLoader{}
-
-		reloader := lazyReloader{
-			path:            "dummy-path",
-			closeablePlugin: mockCloseablePlugin,
-			pluginLoader:    mockLoader,
-			mutex:           sync.Mutex{},
-		}
-
-		mockCloseablePlugin.On("Close", ctx).Return(nil)
-		mockLoader.On("load", ctx, mock.Anything, "dummy-path").Return(nil, errors.New("load error"))
-
-		err := reloader.Reload(ctx)
-		if err == nil {
-			t.Fatalf("expected error, got nil")
-		}
-	})
-}
-
 func TestLazyReloader_Close(t *testing.T) {
 	ctx := context.Background()
 
@@ -207,5 +138,73 @@ func TestLazyReloader_Close_ClearsPlugin(t *testing.T) {
 		assert.Nil(t, reloader.closeablePlugin,
 			"Close must clear the reference or Get will serve a closed plugin")
 		closed.AssertExpectations(t)
+	})
+}
+
+func TestLazyReloader_Reload_Atomic(t *testing.T) {
+	t.Run("failed_load_keeps_previous_module_serving", func(t *testing.T) {
+		ctx := t.Context()
+		original := &MockcloseablePlugin{}
+		mockLoader := &MockpluginLoader{}
+		mockLoader.On("load", ctx, mock.Anything, "dummy-path").
+			Return(nil, errors.New("load error"))
+
+		reloader := lazyReloader{
+			path:            "dummy-path",
+			closeablePlugin: original,
+			pluginLoader:    mockLoader,
+			mutex:           sync.Mutex{},
+		}
+
+		err := reloader.Reload(ctx)
+
+		assert.ErrorContains(t, err, "load error")
+		assert.Same(t, original, reloader.closeablePlugin,
+			"a failed load must leave the previous module installed")
+		original.AssertNotCalled(t, "Close", ctx)
+		mockLoader.AssertExpectations(t)
+	})
+
+	t.Run("successful_reload_closes_only_the_old_plugin", func(t *testing.T) {
+		ctx := t.Context()
+		original := &MockcloseablePlugin{}
+		replacement := &MockcloseablePlugin{}
+		mockLoader := &MockpluginLoader{}
+
+		original.On("Close", ctx).Return(nil)
+		mockLoader.On("load", ctx, mock.Anything, "dummy-path").Return(replacement, nil)
+
+		reloader := lazyReloader{
+			path:            "dummy-path",
+			closeablePlugin: original,
+			pluginLoader:    mockLoader,
+			mutex:           sync.Mutex{},
+		}
+
+		assert.NoError(t, reloader.Reload(ctx))
+		assert.Same(t, replacement, reloader.closeablePlugin)
+		replacement.AssertNotCalled(t, "Close", ctx)
+		original.AssertExpectations(t)
+	})
+
+	t.Run("close_error_on_old_plugin_does_not_fail_reload", func(t *testing.T) {
+		ctx := t.Context()
+		original := &MockcloseablePlugin{}
+		replacement := &MockcloseablePlugin{}
+		mockLoader := &MockpluginLoader{}
+
+		original.On("Close", ctx).Return(errors.New("close error"))
+		mockLoader.On("load", ctx, mock.Anything, "dummy-path").Return(replacement, nil)
+
+		reloader := lazyReloader{
+			path:            "dummy-path",
+			closeablePlugin: original,
+			pluginLoader:    mockLoader,
+			mutex:           sync.Mutex{},
+		}
+
+		assert.NoError(t, reloader.Reload(ctx),
+			"swap already succeeded; a close failure is logged, not returned")
+		assert.Same(t, replacement, reloader.closeablePlugin)
 	})
 }

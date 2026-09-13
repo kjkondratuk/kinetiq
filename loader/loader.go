@@ -113,18 +113,25 @@ func (r *lazyReloader) Reload(ctx context.Context) error {
 		return fmt.Errorf("failed to resolve plugin artifact for reload: %w", err)
 	}
 
-	// Close existing plugin if loaded, since we're reloading
-	err := r.Close(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to close plugin for reload: %w", err)
-	}
-
+	// Load the replacement while the current module keeps serving. A failure
+	// here must leave the running module untouched.
 	ld, err := r.load(ctx, &r.mutex, r.path)
 	if err != nil {
 		return fmt.Errorf("failed to reload plugin: %w", err)
 	}
 
+	r.mutex.Lock()
+	old := r.closeablePlugin
 	r.closeablePlugin = ld
+	r.mutex.Unlock()
+
+	// The swap has already succeeded, so a close failure is logged rather than
+	// returned -- the caller has a working module either way.
+	if old != nil {
+		if cerr := old.Close(ctx); cerr != nil {
+			slog.Error("failed to close previous plugin after swap", "error", cerr)
+		}
+	}
 
 	return nil
 }
