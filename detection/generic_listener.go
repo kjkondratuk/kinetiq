@@ -40,7 +40,7 @@ func FilesystemNotificationReloadSignaller(reloadCh chan<- struct{}, debounce ti
 			return
 		}
 
-		log.Printf("Detected change in %s", notification.Name)
+		name := notification.Name
 
 		mu.Lock()
 		defer mu.Unlock()
@@ -48,6 +48,8 @@ func FilesystemNotificationReloadSignaller(reloadCh chan<- struct{}, debounce ti
 			timer.Stop()
 		}
 		timer = time.AfterFunc(debounce, func() {
+			log.Printf("Detected change in %s", name)
+
 			// Non-blocking: if a reload is already pending, this change is
 			// covered by it.
 			select {
