@@ -45,8 +45,9 @@ func (l *defaultPluginLoader) load(ctx context.Context, mutex *sync.Mutex, path 
 type lazyReloader struct {
 	closeablePlugin
 	pluginLoader
-	mutex sync.Mutex
-	path  string
+	mutex  sync.Mutex
+	path   string
+	closed bool
 
 	// resolve fetches the module artifact to path before it is loaded. It is nil
 	// for loaders whose artifact is already present on local disk.
@@ -84,26 +85,51 @@ func (r *lazyReloader) resolveArtifact(ctx context.Context) error {
 }
 
 func (r *lazyReloader) Get(ctx context.Context) (v1.ModuleService, error) {
-	var plugin closeablePlugin
-	if r.closeablePlugin != nil {
-		// don't allow loading and retrieval at the same time
-		r.mutex.Lock()
-		plugin = r.closeablePlugin
-		r.mutex.Unlock()
-	} else {
-		if err := r.resolveArtifact(ctx); err != nil {
-			return nil, fmt.Errorf("failed to resolve plugin artifact: %w", err)
-		}
+	r.mutex.Lock()
+	plugin := r.closeablePlugin
+	r.mutex.Unlock()
 
-		var err error
-		plugin, err = r.load(ctx, &r.mutex, r.path)
-		if err != nil {
-			return nil, err
-		}
-		r.closeablePlugin = plugin
+	if plugin != nil {
+		return plugin, nil
 	}
 
-	return plugin, nil
+	if err := r.resolveArtifact(ctx); err != nil {
+		return nil, fmt.Errorf("failed to resolve plugin artifact: %w", err)
+	}
+
+	// Load without holding the mutex: load() acquires it internally, and
+	// holding it here would deadlock.
+	loaded, err := r.load(ctx, &r.mutex, r.path)
+	if err != nil {
+		return nil, err
+	}
+
+	r.mutex.Lock()
+	switch {
+	case r.closed:
+		// A Close() landed while we were loading. Nothing will ever close
+		// this plugin if we install it, so close it ourselves and report
+		// that the loader is no longer usable.
+		r.mutex.Unlock()
+		if cerr := loaded.Close(ctx); cerr != nil {
+			slog.Error("failed to close plugin loaded after Close", slog.String("err", cerr.Error()))
+		}
+		return nil, fmt.Errorf("loader is closed")
+	case r.closeablePlugin != nil:
+		// Another goroutine's Get (or a Reload) installed a plugin while we
+		// were loading ours. Prefer the already-installed one and close the
+		// redundant one we just loaded.
+		existing := r.closeablePlugin
+		r.mutex.Unlock()
+		if cerr := loaded.Close(ctx); cerr != nil {
+			slog.Error("failed to close redundant plugin", slog.String("err", cerr.Error()))
+		}
+		return existing, nil
+	default:
+		r.closeablePlugin = loaded
+		r.mutex.Unlock()
+		return loaded, nil
+	}
 }
 
 func (r *lazyReloader) Reload(ctx context.Context) error {
@@ -121,6 +147,16 @@ func (r *lazyReloader) Reload(ctx context.Context) error {
 	}
 
 	r.mutex.Lock()
+	if r.closed {
+		// A Close() raced us and won: the loader is shutting down, so don't
+		// resurrect it by installing the plugin we just loaded. Close it
+		// instead -- otherwise nothing ever would.
+		r.mutex.Unlock()
+		if cerr := ld.Close(ctx); cerr != nil {
+			slog.Error("failed to close plugin loaded after Close", slog.String("err", cerr.Error()))
+		}
+		return fmt.Errorf("loader is closed")
+	}
 	old := r.closeablePlugin
 	r.closeablePlugin = ld
 	r.mutex.Unlock()
@@ -129,7 +165,7 @@ func (r *lazyReloader) Reload(ctx context.Context) error {
 	// returned -- the caller has a working module either way.
 	if old != nil {
 		if cerr := old.Close(ctx); cerr != nil {
-			slog.Error("failed to close previous plugin after swap", "error", cerr)
+			slog.Error("failed to close previous plugin after swap", slog.String("err", cerr.Error()))
 		}
 	}
 
@@ -140,6 +176,7 @@ func (r *lazyReloader) Close(ctx context.Context) error {
 	r.mutex.Lock()
 	p := r.closeablePlugin
 	r.closeablePlugin = nil
+	r.closed = true
 	r.mutex.Unlock()
 
 	if p != nil {
