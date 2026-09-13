@@ -7,6 +7,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"io"
 	"os"
 	"path/filepath"
@@ -151,6 +152,12 @@ func TestS3Loader_download(t *testing.T) {
 	t.Run("file_creation_error", func(t *testing.T) {
 		ctx := context.Background()
 		mockS3Client := NewMockS3Client(t)
+		// GetObject is attempted before any local file is touched, so it must
+		// succeed here in order to exercise the temp-file creation failure
+		// that follows it.
+		mockS3Client.EXPECT().GetObject(mock.Anything, mock.Anything, mock.Anything).Return(&s3.GetObjectOutput{
+			Body: io.NopCloser(bytes.NewReader([]byte("test content"))),
+		}, nil)
 
 		loader := NewS3Loader(mockS3Client, "test-bucket", "/nonexistent/directory/test-plugin").(*s3Loader)
 
@@ -192,6 +199,32 @@ func TestS3Loader_download(t *testing.T) {
 		assert.Error(t, err, "A copy failure must be returned, not just logged")
 		assert.Contains(t, err.Error(), "failed to write downloaded artifact")
 	})
+}
+
+// A failed download must not destroy the artifact already on disk: the running
+// module survives in memory, but a restart would have nothing to load.
+func TestS3Loader_Download_FailurePreservesExistingArtifact(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "test-plugin.wasm")
+
+	existing := []byte("GOOD-MODULE-BYTES")
+	require.NoError(t, os.WriteFile(path, existing, 0o644))
+
+	mockS3Client := NewMockS3Client(t)
+	mockS3Client.EXPECT().GetObject(mock.Anything, mock.Anything, mock.Anything).
+		Return(nil, errors.New("s3 unavailable"))
+
+	running := &MockcloseablePlugin{}
+	l := NewS3Loader(mockS3Client, "test-bucket", path).(*s3Loader)
+	l.pluginLoader = &MockpluginLoader{}
+	l.closeablePlugin = running
+
+	assert.Error(t, l.Reload(ctx))
+
+	after, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, existing, after,
+		"a failed download must leave the existing on-disk artifact intact")
 }
 
 // errorReader is a mock io.Reader that always returns an error
