@@ -130,7 +130,15 @@ func (p *wasmProcessor) Start(ctx context.Context) {
 				attribute.Int("result.headers.count", len(process.Headers)),
 			)
 
-			p.output <- process
+			select {
+			case p.output <- process:
+			case <-ctx.Done():
+				// Unblock on shutdown: Close() closes p.output, and a send
+				// blocked at that moment would panic.
+				processSpan.End()
+				stopMeasure()
+				return
+			}
 
 			// End the span and stop measuring
 			processSpan.End()

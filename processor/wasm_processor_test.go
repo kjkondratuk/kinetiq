@@ -104,6 +104,112 @@ func TestWasmProcessor_Start(t *testing.T) {
 	})
 }
 
+func TestWasmProcessor_Start_UnblocksOnContextCancelDuringOutputSend(t *testing.T) {
+	mockModuleService := &v1.MockmoduleService{}
+	mockLoader := &loader.MockLoader{}
+	mockInputChannel := make(chan source.Record, 1)
+
+	ctx := context.Background()
+	inputRecord := source.Record{
+		Key:   []byte("input-key"),
+		Value: []byte("input-value"),
+		Headers: []source.RecordHeader{
+			{Key: "header-key", Value: []byte("header-value")},
+		},
+		Ctx: ctx,
+	}
+	mockInputChannel <- inputRecord
+
+	expectedResponse := &v1.ProcessResponse{
+		Key:   []byte("processed-key"),
+		Value: []byte("processed-value"),
+		Headers: []*v1.Headers{
+			{Key: "header-key", Value: []byte("header-value")},
+		},
+	}
+	mockModuleService.On("Process", mock.Anything, mock.Anything).Return(expectedResponse, nil)
+	mockLoader.On("Get", mock.Anything).Return(mockModuleService, nil)
+
+	p, err := NewWasmProcessor(mockLoader, mockInputChannel, nil)
+	require.NoError(t, err)
+
+	startCtx, cancel := context.WithCancel(context.Background())
+
+	done := make(chan struct{})
+	go func() {
+		p.Start(startCtx)
+		close(done)
+	}()
+
+	// Give Start time to process the record and block attempting to send
+	// the result on the (unbuffered, undrained) output channel. Nothing
+	// ever reads from p.Output() in this test.
+	time.Sleep(100 * time.Millisecond)
+
+	cancel()
+
+	select {
+	case <-done:
+		// Start returned as expected once the context was cancelled.
+	case <-time.After(2 * time.Second):
+		t.Fatal("Start did not return after context cancellation while blocked sending output")
+	}
+}
+
+func TestWasmProcessor_CloseAfterContextCancelDoesNotPanic(t *testing.T) {
+	mockModuleService := &v1.MockmoduleService{}
+	mockLoader := &loader.MockLoader{}
+	mockInputChannel := make(chan source.Record, 1)
+
+	ctx := context.Background()
+	inputRecord := source.Record{
+		Key:   []byte("input-key"),
+		Value: []byte("input-value"),
+		Headers: []source.RecordHeader{
+			{Key: "header-key", Value: []byte("header-value")},
+		},
+		Ctx: ctx,
+	}
+	mockInputChannel <- inputRecord
+
+	expectedResponse := &v1.ProcessResponse{
+		Key:   []byte("processed-key"),
+		Value: []byte("processed-value"),
+		Headers: []*v1.Headers{
+			{Key: "header-key", Value: []byte("header-value")},
+		},
+	}
+	mockModuleService.On("Process", mock.Anything, mock.Anything).Return(expectedResponse, nil)
+	mockLoader.On("Get", mock.Anything).Return(mockModuleService, nil)
+
+	p, err := NewWasmProcessor(mockLoader, mockInputChannel, nil)
+	require.NoError(t, err)
+
+	startCtx, cancel := context.WithCancel(context.Background())
+
+	done := make(chan struct{})
+	go func() {
+		p.Start(startCtx)
+		close(done)
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Start did not return after context cancellation")
+	}
+
+	// Close() must not panic even though Start was blocked on the output
+	// send when the context was cancelled.
+	assert.NotPanics(t, func() {
+		p.Close()
+	})
+}
+
 func TestWasmProcessor_process(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		mockModuleService := &v1.MockmoduleService{}
