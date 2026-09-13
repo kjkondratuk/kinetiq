@@ -70,7 +70,7 @@ func TestKafkaWriter_Write(t *testing.T) {
 				ch <- processor.Result{
 					Key:   []byte("key"),
 					Value: []byte("value"),
-					Ctx: ctx,
+					Ctx:   ctx,
 				}
 				return ch
 			}(),
