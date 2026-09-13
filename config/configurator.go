@@ -154,7 +154,7 @@ func (c configurator) Configure(ctx context.Context) (Config, error) {
 	consumerDialTimeoutMs := getEnvOrDefault("KAFKA_CONSUMER_DIAL_TIMEOUT_MS", 0)
 	consumerTlsEnabled := truthy("KAFKA_CONSUMER_TLS_ENABLED")
 	consumerTopics := getList("KAFKA_CONSUMER_TOPICS")
-	consumerGroup := getEnvOrDefault("KAFKA_CONSUMER_GROUP", "")
+	consumerGroup := getEnvOrDefault("KAFKA_CONSUMER_GROUP", "kinetiq")
 	consumerOffset := getEnvOrDefault("KAFKA_CONSUMER_OFFSET", "")
 	consumerSaslMechanism := os.Getenv("KAFKA_CONSUMER_SASL_MECHANISM")
 	consumerOAuthExtensions := parseMap("KAFKA_CONSUMER_OAUTH_EXTENSIONS")
@@ -424,7 +424,11 @@ func (c configurator) ConsumerConfig(conf Config) []kgo.Opt {
 	}
 
 	if conf.Kafka.Consumer.Group != "" {
-		consumerOpts = append(consumerOpts, kgo.ConsumerGroup(conf.Kafka.Consumer.Group))
+		consumerOpts = append(consumerOpts,
+			kgo.ConsumerGroup(conf.Kafka.Consumer.Group),
+			// Commit only what the writer has confirmed, via MarkCommitRecords.
+			kgo.AutoCommitMarks(),
+		)
 	}
 
 	if conf.Kafka.Consumer.Offset != "" {

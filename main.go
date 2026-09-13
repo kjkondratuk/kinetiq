@@ -120,7 +120,9 @@ func main() {
 	log.Print("Writer client configured...")
 
 	// Create Kafka writer with instrumentation
-	writer, err := sink_kafka.NewKafkaWriter(writerClient, proc.Output())
+	// readerClient (the consumer) is passed as the marker, not writerClient: only
+	// the consumer can commit its own offsets via MarkCommitRecords.
+	writer, err := sink_kafka.NewKafkaWriter(writerClient, proc.Output(), readerClient)
 	if err != nil {
 		slog.Error("Failed to create kafka writer", "error", err)
 		os.Exit(1)
