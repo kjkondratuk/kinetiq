@@ -130,8 +130,13 @@ func (r *lazyReloader) Reload(ctx context.Context) error {
 }
 
 func (r *lazyReloader) Close(ctx context.Context) error {
-	if r.closeablePlugin != nil {
-		return r.closeablePlugin.Close(ctx)
+	r.mutex.Lock()
+	p := r.closeablePlugin
+	r.closeablePlugin = nil
+	r.mutex.Unlock()
+
+	if p != nil {
+		return p.Close(ctx)
 	}
 	return nil
 }

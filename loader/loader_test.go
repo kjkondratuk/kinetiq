@@ -189,3 +189,23 @@ func TestLazyReloader_Close(t *testing.T) {
 		}
 	})
 }
+
+func TestLazyReloader_Close_ClearsPlugin(t *testing.T) {
+	t.Run("close_nils_field_so_get_reloads", func(t *testing.T) {
+		ctx := t.Context()
+		closed := &MockcloseablePlugin{}
+		closed.On("Close", ctx).Return(nil)
+
+		reloader := lazyReloader{
+			path:            "dummy-path",
+			closeablePlugin: closed,
+			pluginLoader:    &MockpluginLoader{},
+			mutex:           sync.Mutex{},
+		}
+
+		assert.NoError(t, reloader.Close(ctx))
+		assert.Nil(t, reloader.closeablePlugin,
+			"Close must clear the reference or Get will serve a closed plugin")
+		closed.AssertExpectations(t)
+	})
+}
