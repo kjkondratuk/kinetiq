@@ -178,6 +178,7 @@ func (p *wasmProcessor) process(ctx context.Context, record source.Record) (Resu
 		Value:   res.Value,
 		Headers: hdr,
 		Ctx:     ctx,
+		Src:     record.Src,
 	}, nil
 }
 
