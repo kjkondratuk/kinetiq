@@ -24,7 +24,13 @@ func (l *defaultPluginLoader) load(ctx context.Context, mutex *sync.Mutex, path 
 		wazero.NewModuleConfig().
 			WithStartFunctions("_initialize", "_start"). // unclear why adding this made things work... It should be doing this anyway...
 			WithStdout(os.Stdout).
-			WithStderr(os.Stderr),
+			WithStderr(os.Stderr).
+			// wazero defaults to a fake clock fixed at 2022-01-01 that advances
+			// 1ms per reading. Guest modules legitimately need real time for
+			// windowing, TTLs and record timestamps, so supply the host's.
+			WithSysWalltime().
+			WithSysNanotime().
+			WithSysNanosleep(),
 	))
 	if err != nil {
 		slog.Error("Failed to setup plugin environment", slog.String("err", err.Error()))
