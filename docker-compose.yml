@@ -60,8 +60,14 @@ services:
             PLUGIN_REF: ./examples/test_module/test_module.wasm
             OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector:4317
             OTEL_EXPORTER_OTLP_INSECURE: "true"
+            # The SDK is off unless this is set explicitly, so without it the
+            # observability profile collects nothing.
+            OTEL_SDK_DISABLED: "false"
         volumes:
-            - ./examples/test_module/test_module.wasm:/root/examples/test_module/test_module.wasm:ro
+            # Mount the directory, not the .wasm file. A single-file bind mount pins the
+            # original inode, and `go build -o` replaces the file on a real rebuild, so the
+            # container would stay stranded on the original module bytes forever.
+            - ./examples/test_module:/root/examples/test_module:ro
         depends_on:
             - kafka-topic-creator
         logging:
